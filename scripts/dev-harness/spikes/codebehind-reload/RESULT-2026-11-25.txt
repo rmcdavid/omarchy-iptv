@@ -44,7 +44,10 @@ Service-player.js's socketAttached renamed socketAttachedLive and
 Service.qml's forwarder calling the new name), C3 83a0e01 (0.99.2, the
 same files), without RIG_C2_PART; 47 allowlisted files. R1c's builds are 8fa4998's (C1
 f33734c), R1ma's and R1ma2's dce5268's (C1 72f0daf), R1mb's 80f80a0's
-(C1 4aefb3a). Host: omarchy 4.5.0-3 (shell.qml and
+(C1 4aefb3a); those two scratch commits are kept as mutants/
+no-root-manifest-handler.patch and no-manifestfile-onfilechanged.patch,
+each of which, applied to 6fb53e4 and committed, gives candidates.py
+those exact exports (lane-l3cagefix, 2026-11-25). Host: omarchy 4.5.0-3 (shell.qml and
 services/PluginRegistry.qml pinned by make-root.py), quickshell
 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, git
 2.56.0-1, cage 0.3.1-1. Crash journal 89 before and after every shell of

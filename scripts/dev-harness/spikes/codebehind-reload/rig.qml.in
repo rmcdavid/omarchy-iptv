@@ -139,6 +139,10 @@
         out.guideOpened = guide.opened === true
         out.guideFooter = String(guide.footerStatusText)
         out.guideServiceIsService = guide.service === s
+        // A view with no service yet (the bar's own 500 ms resolve) is not one
+        // bound to another service object: analyze.py names only the first
+        // as waiting for its report (lane-l3cagefix, 2026-11-25).
+        out.guideServiceIsNull = guide.service === null || guide.service === undefined
         out.guideStamp = guide.buildStamp !== undefined ? guide.buildStamp : null
         out.guideNotice = guide.buildNotice !== undefined ? guide.buildNotice : null
         // The guide's body when it draws an empty state (the no-service
@@ -152,6 +156,7 @@
       if (bar) {
         out.bar = bar.reloadMark !== undefined ? bar.reloadMark : "no reloadMark (C0's BarWidget.qml)"
         out.barServiceIsService = bar.service === s
+        out.barServiceIsNull = bar.service === null || bar.service === undefined
         out.barStamp = bar.buildStamp !== undefined ? bar.buildStamp : null
         out.barNotice = bar.buildNotice !== undefined ? bar.buildNotice : null
         out.barTooltip = bar.tooltip !== undefined ? String(bar.tooltip) : null

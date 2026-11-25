@@ -224,14 +224,22 @@ def stamp_lines(k):
     # (BarWidget.qml's resolveService), so a mark taken inside that window
     # finds it unstamped (lane-l3cage, a-12-t and b-12-t, 2026-11-25). Named,
     # not counted; a view that HAS the service and is unstamped still is.
+    # And only a view whose service is null is waiting for one: `attached`
+    # is false too for a view bound to ANOTHER service object, which has
+    # reported to that one, so where the rig records the null (rig.qml.in
+    # since lane-l3cagefix, 2026-11-25) such a view counts as unstamped;
+    # marks taken before then say only that it was not recorded.
     attached = {"Guide.qml": k.get("guideServiceIsService"), "BarWidget.qml": k.get("barServiceIsService")}
+    unset = {"Guide.qml": k.get("guideServiceIsNull"), "BarWidget.qml": k.get("barServiceIsNull")}
     for name, build in sorted(marks.items()):
         stamp = stamps.get(name)
         want = MARK_VERSIONS.get(build) if build else None
         if build is None and stamp not in (None, "?"):
             off.append("%s unmarked but stamped %s" % (name, stamp))
+        elif build is not None and stamp is None and attached.get(name) is False and unset.get(name) is False:
+            off.append("%s marked %s (%s) holds another service object and is not stamped" % (name, build, want))
         elif build is not None and stamp is None and attached.get(name) is False:
-            pending.append(name)
+            pending.append(name if unset.get(name) is True else name + " (whether its service was null is not recorded)")
         elif build is not None and stamp is None:
             # A marked file the reply does not stamp: a view that never
             # reported (the l3-bar-no-report patch's shape), which a check
@@ -241,25 +249,35 @@ def stamp_lines(k):
             off.append("%s marked %s (%s) but stamped %s" % (name, build, want, stamp))
     builds = mark_builds(marks)
     mixed_marks = len(builds) > 1
+    # What the user is told is the views' notices, and a view that holds
+    # this service shows the reply's own: one that says anything else tells
+    # the user what the reply does not (lane-l3cagefix, 2026-11-25, from the
+    # measure recheck of 1193870: the views' notices were printed and never
+    # judged, so a `cache` reply beside two views reading "" read as fitting).
+    unlike = ["%s says %r" % (view, k.get(key))
+              for view, key in (("Guide.qml", "guideNotice"), ("BarWidget.qml", "barNotice"))
+              if attached.get(view) is True and k.get(key) is not None and k.get(key) != b.get("notice")]
+    told = "" if not unlike else "; the views do not say the reply's %r: %s" % (b.get("notice"), ", ".join(unlike))
     if not stamps and b.get("running") == "":
         # The reading threw, so the reply carries no stamps: the service's
         # buildCheck catch, which reads "cache" because only a mix makes the
         # reading throw. Seen with a model part from before the stamps under
         # the first stamped build (lane-l3cage, a-01-x at model/text.mjs,
         # 2026-11-25): the marks see no model file, cache.py names it.
-        agree = b.get("notice") == "cache"
+        agree = b.get("notice") == "cache" and not unlike
         lines.append("agree    marks name %s; the reading threw (no stamps, running ''), so the notice must be "
-                     "the catch's \"cache\": %s" % (
-                         "one build, " + builds[0] if len(builds) == 1 else "a mix of " + ", ".join(builds),
+                     "the catch's \"cache\"%s: %s" % (
+                         "one build, " + builds[0] if len(builds) == 1 else "a mix of " + ", ".join(builds), told,
                          "the notice fits the marks" if agree else "THE NOTICE DOES NOT FIT THE MARKS (a finding)"))
         return lines
     # A mix the marks see must read "cache"; one build may read anything
     # (a whole build loaded behind the disk reads "cache" too).
-    agree = not off and (not mixed_marks or b.get("notice") == "cache")
-    lines.append("agree    marks name %s; stamps %s%s; %s" % (
+    agree = not off and not unlike and (not mixed_marks or b.get("notice") == "cache")
+    lines.append("agree    marks name %s; stamps %s%s%s; %s" % (
         "one build, " + builds[0] if len(builds) == 1 else "a mix of " + ", ".join(builds),
         "agree with every mark" if not off else "disagree: " + "; ".join(off),
         "" if not pending else " (not yet handed the service, so unreported: %s)" % ", ".join(pending),
+        told,
         "the notice fits the marks" if agree else "THE NOTICE DOES NOT FIT THE MARKS (a finding)"))
     return lines
 
