@@ -1431,7 +1431,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4073}
 # tests (judge() refuses a closure in each code-behind; a static method's
 # two refusals; a header's exemption is its line's), each red on its
 # mutant (QA-RESULTS "Round three"); the suite counts 3033.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3033}
+# 2026-11-24, lane-fix-c5d (F-GATE-30): 3033 -> 3055 -- tests/test_helper_stdlib.py's
+# 22 tests (CLAUDE.md's constraint 3, the helper's standard-library rule, read
+# off every helper file the stub lists at any depth, its one dynamic import
+# judged name by name); 3 red on a copy of the tree with a function-level
+# third-party import added to a part and the stub resealed, and one-decision
+# mutants of the reader red (QA-RESULTS "D-REL-14: call (d), the rechecks of
+# the settle (lane-fix-c5d, 2026-11-24)"); the suite counts 3055.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3055}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
