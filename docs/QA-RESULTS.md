@@ -27979,7 +27979,9 @@ a86d1a4, c598733):
 The runs, each under the heavy lock with `flock -o` and nice 10,
 `RIG_DEV=3200d22 RIG_C0=main`, builds C0 1321aff, C1 79594ed, C2 34230d8
 (the same three as lane-reload-d's and the recheck's), C3 9d60275; every
-run as printed is in `RESULT-2026-11-24-race.txt` beside the rig:
+run as printed is in `RESULT-2026-11-24-race.txt` beside the rig, less the
+lines its header names (the cage's warnings every start prints, and the
+cache lines of files the same in all four builds):
 - R1 at 81de1af: b-12-x, `RIG_QMLCACHE=xdg RIG_RECOVER=clear`.
 - R2-R5 at 4f21014: a-12-r b-12-r; b-12-x b-01-x (xdg, update); b-01-x
   (xdg, clear); a-12-w-c4 b-12-w-c4 a-12-w-g4 a-12-h1 b-12-h1.
