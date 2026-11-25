@@ -28056,11 +28056,13 @@ text is the one the scanner read at the first load. The code-behinds
 race that matters is a write between a code-behind's read and its save.
 
 **The sweep.** The scanner reads `Service.qml` at the first load and the
-engine reads the code-behinds about 0.66 s later (Q8), and the merge takes
-24-43 ms from its start to its writes, so no trigger in the plugin folder
-fires close enough to a code-behind's read: the sweep fired the merge at
-the scanner's read of `Service.qml` and swept the delay across the
-code-behinds' reads, at one worker and four, twelve delays each, 24 races
+engine reads the code-behinds about 0.66 s later (Q8), all four within
+about 20 ms, and the merge takes 24-43 ms from its start to its writes. A
+merge fired at a code-behind's own open, as the lane text suggested and
+the recheck's R9 did twice, therefore writes after every code-behind has
+been read and saved (R9 recovered at the restart both times), so the
+sweep fired the merge at the scanner's read of `Service.qml` and swept the
+delay across the code-behinds' reads, at one worker and four, twelve delays each, 24 races
 in all (the bound the lead set, reached with a poisoned cache already
 found at its fifth delay):
 
