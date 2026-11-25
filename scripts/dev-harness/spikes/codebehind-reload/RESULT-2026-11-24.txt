@@ -45,7 +45,8 @@ change with code-behinds" holds the reading).
   back as its first type with its first text (v=one), so no path the rig
   drove released a component once loaded. The host's disable drops the bar
   entry (refreshMinutes 120 -> 360 after the enable; D-QA-17).
-- Write order (17 updates): at git's default one worker every working-tree
+- Write order (17 updates [lane-settle-c5d, 2026-11-24: 17 merges timed,
+  11 updates and 6 half-tree completions]): at git's default one worker every working-tree
   close was in index order (Service-*.js, then Service.qml, then
   manifest.json and model/), the writes spanning 5.3-5.8 ms of a 38-47 ms
   merge with no gap above 1.4 ms [the join, 2026-11-24: this line read
@@ -53,21 +54,31 @@ change with code-behinds" holds the reading).
   the decoy HOME's ~/.gitconfig (1 of 1, the order no longer index order,
   so the user's setting reached the update's git), the closes interleaved;
   in the two `-c` runs Service.qml was created before Service-rewind.js (and
-  Service-player.js) closed. No host reload or load began before the last
+  Service-player.js) closed [lane-settle-c5d, 2026-11-24: created, not
+  complete; in all three four-worker runs Service.qml CLOSED after every
+  code-behind, so no run here left a complete new Service.qml beside an
+  absent code-behind, h4's shape; RESULT-2026-11-24-race.txt reads the
+  unlinks too]. No host reload or load began before the last
   write in any of the 17.
 - A shell starting cold inside that window (h arms, made by hand): h1 (the
   new code-behinds beside the old Service.qml, one worker's window) ran a
   MIX, "C1 Service.qml, C2" code-behinds, its status throwing "TypeError:
   Property 'socketAttached' of object [object Object] is not a function";
   h4 (the new Service.qml with Service-player.js not there, four workers'
-  window) and the first release's h4 (C1's Service.qml with no code-behind
+  window [lane-settle-c5d, 2026-11-24: not in these runs, but in 3 of
+  the settle's 15 four-worker runs, for 0.1-1.1 ms each; four workers'
+  longer window is h0, every changed file unlinked before any is
+  created, RESULT-2026-11-24-race.txt]) and the first release's h4 (C1's Service.qml with no code-behind
   yet) loaded no service: "Script file://.../Service-player.js
   unavailable" (Service-pip.js for the first release); h0 (Service.qml
   unlinked, any worker count, 0.20.0's own window) loaded no service: "No
   such file or directory". In every h arm, both roots where run, the
   completed tree, the watcher's reload, rescanPlugins and a disable and an
   enable all returned the same mixed or failed load; only the restart
-  recovered.
+  recovered [lane-settle-c5d, 2026-11-24: on these hand-made trees. A real
+  race can leave Qt's disk cache holding the old code under the new file's
+  checksum, Service.qml's on root b and a code-behind's on root a, and that
+  mix survives restarts; RESULT-2026-11-24-race.txt].
 
 THE RUNS AS PRINTED.
 

@@ -11,7 +11,10 @@ Date.now() and run.sh's `date +%s%3N` read), the event names and the path.
 (create, close_write, delete, move): git's writes. `opens` asks for open and
 close_nowrite: every read of a file, which is how the rig times the shell's
 own reads at a cold start (a file git creates is opened too, so an open that
-follows a CREATE of the same path is git's; analyze.py tells them apart).
+follows a CREATE of the same path is git's, and analyze.py drops it; but git
+also re-reads files it checks before it overwrites them and after, and
+inotify names no process, so an open inside a merge's span may be git's: the
+rig's verdicts rest on the marks and the cache files, never on an open).
 READY is created once the watches are established. Ends its inotifywait (its
 own child, by the pid it started) on SIGTERM, and exits.
 """
