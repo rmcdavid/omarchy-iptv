@@ -67,10 +67,10 @@
 #      build -- the bar, the guide, the README and the four code-behinds for
 #      12 -- every file the update deletes deleted, and Service.qml and what
 #      sorts after it (manifest.json, model/, bin/) the old build's
-#   h4 a shape four workers could leave: the new Service.qml complete while
-#      Service-player.js is not there (for 01, no code-behind is there yet).
-#      No measured run has produced it: in every four-worker run Service.qml
-#      closed after every code-behind (analyze.py prints the h4 line)
+#   h4 four workers' brief moment: the new Service.qml complete while
+#      Service-player.js is not there (for 01, no code-behind is there yet);
+#      analyze.py's h4 line says whether a run passed through it (3 of 15
+#      four-worker runs on 2026-11-24, for 0.1-1.1 ms each)
 #   h0 git between unlinking Service.qml and writing it again: sub-ms at one
 #      worker, and at four the main process unlinks every changed file
 #      before the workers create any, so Service.qml is absent for some ms
