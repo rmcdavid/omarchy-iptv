@@ -39,7 +39,19 @@ import "Service-sources.js" as ServiceSources
 // `player start` is the only spawn path, and its /proc scan plus flock are
 // what keep a second window impossible (requirement 1).
 //
-// keepLoaded: edits to THIS file only apply after `omarchy restart shell`.
+// Most of its functions keep only a one-line forwarder here, at its old
+// place; each body lives in one of the four code-behinds imported above,
+// Service-pip.js, Service-player.js, Service-rewind.js, and
+// Service-sources.js, which all run in this file's own scope (D-REL-14;
+// SERVICE-SPLIT.md on `dev`). Edit a body there, never its forwarder.
+//
+// Edits to THIS file or to its code-behinds only apply after `omarchy
+// restart shell`. keepLoaded carries this object over the host's plugin
+// reload, and the engine keeps the component it first compiled: measured
+// across a version change with code-behinds (D-REL-14's call (d)), the
+// host's reload, a rescan and a disable and an enable all ran the build
+// the shell first loaded, this file and every code-behind together, and
+// the guide and the bar with them.
 Item {
   id: root
 

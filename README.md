@@ -110,9 +110,10 @@ all three are one plugin.
 **Updating.** `omarchy plugin update io.github.rmcdavid.iptv` fetches the new
 version, and then **restart the shell with `omarchy-restart-shell`**. The
 update rewrites the plugin's files on disk, but the running shell keeps the
-background service it already loaded until it is restarted, and the guide's
-footer says `Updated`, then `restart the shell to see the new version`, while
-that is the case. This matters for the logo update described under Settings: until
+plugin it already loaded — the background service, the guide and the bar —
+until it is restarted, and disabling and enabling the plugin does not load the
+new version either. The guide's footer says `Updated`, then `restart the
+shell to see the new version`, while that is the case. This matters for the logo update described under Settings: until
 the shell restarts, the old service is the one talking to the new helper, so
 the cache sweep runs but the guide-side guard that keeps one source's logo
 list from being drawn against another source's files is not in place yet.
@@ -1775,8 +1776,27 @@ Nothing inside the plugin directory is written at runtime.
   export OMARCHY_IPTV_URL`, run the command without `--url`, then
   `unset OMARCHY_IPTV_URL`. Or just use the guide, which is what it is for.
 - Shell console: `qs log -p /usr/share/omarchy/shell --tail 100`.
-- After editing `Service.qml` run `omarchy restart shell` (kept-loaded
-  services do not hot-reload).
+- After editing `Service.qml`, one of the code-behinds beside it that hold
+  most of its functions (`Service-pip.js`, `Service-player.js`,
+  `Service-rewind.js`, `Service-sources.js`), `Guide.qml`, `BarWidget.qml`
+  or the model, run `omarchy restart shell`. The running shell keeps the
+  code it loaded first: the shell's own plugin reload, a rescan and a
+  disable and an enable all bring back the same build, the kept-loaded
+  service and the guide and the bar alike.
+- **IPTV is missing from the bar, or misbehaves, after an update even though
+  you restarted the shell.** A shell that was starting while
+  `omarchy plugin update` was still writing the plugin's files can fail to
+  load the plugin at all, so the bar shows no IPTV and the guide does not
+  open, or can load part of the old version beside part of the new one; and
+  Quickshell keeps compiled copies of what it loaded in its QML cache, which
+  can carry such a mix into the next start. Restart the shell once more
+  (`omarchy-restart-shell`), which loads a plugin that did not load; if IPTV
+  still misbehaves, remove Quickshell's QML cache and restart:
+  `rm -rf ~/.cache/quickshell/qmlcache && omarchy-restart-shell` (the folder
+  is under `$XDG_CACHE_HOME/quickshell/` instead when you set that variable).
+  The cache holds only compiled copies of QML and JavaScript files and is
+  rebuilt at the next start. Updating to the next version also clears it for
+  the files that version changes.
 
 ## Uninstall
 

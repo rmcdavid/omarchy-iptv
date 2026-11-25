@@ -27292,3 +27292,1324 @@ The lead's calls at the merge, each under the owner's standing authority of
   across a version change in a cage (D-REL-6), and D-REL-9's write order.
 - The settle lane could not run tests/test_host_load_patch.py, because its
   gdb driver went with /tmp. It runs in the gate on the merged tree.
+
+## D-REL-14: call (d), a version change with code-behinds (lane-reload-d, 2026-11-24)
+
+Call (d), the lead's call under the owner's standing authority of
+2026-11-09: before the first release that ships a code-behind, two things
+are measured or answered, never assumed. (1) A hot reload across a version
+change with code-behinds, in a nested cage. (2) D-REL-9's write order, which
+Part A measured holds only at git's default `checkout.workers=1`. Both are
+measured here, on branch reload-d from 3200d22, with no shipped file
+changed. The rig is scripts/dev-harness/spikes/codebehind-reload/ (9d40778,
+0dbc3d0). Its record, RESULT-2026-11-24.txt (2f62745), holds every arm as
+the five runs printed it, at 0dbc3d0 with C1 exported from 3200d22.
+
+**The answer.**
+- On the ordinary update path the reload holds. After an update the old
+  build keeps running everywhere, unmixed, and the guide says "Updated".
+  That stays true through the host's watcher reload, rescanPlugins, and two
+  disables and enables, and a restart then runs the new build clean.
+- D-REL-9's order holds at one checkout worker only. At four, which a
+  user's own git configuration reaches, Service.qml can be written before a
+  code-behind closes. **[2026-11-24, lane-settle-c5d: being written, not complete: at four workers git unlinks every changed file before any worker creates one (h0, Service.qml absent 5.1-5.8 ms), and h4's shape, the new Service.qml complete beside an absent or unfinished code-behind, occurred in 3 of the 15 four-worker runs lane-settle-c5d measured, for 0.1-1.1 ms each (`Service.qml` closed before `Service-player.js` or `Service-rewind.js` was created or closed), and in none of the six before; the section "D-REL-14: call (d), settled (lane-settle-c5d, 2026-11-24)" below]** **[2026-11-24, lane-fix-c5d: 5.1-14.6 ms with recheck-c5ds-measure's 19 four-worker races (14.6 in its M1); and 0.1-1.1 ms is a difference of the rig's read stamps, below their precision of about 2 ms; the section "D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)" below]**
+- No reload the host makes reads the tree while git writes it. A shell that
+  loads the plugin cold inside that window does read it, and keeps what it
+  read until a restart. That is filed as D-REL-16 below. **[2026-11-24, lane-settle-c5d: on root b a real race also leaves Qt's QML disk cache holding the old Service.qml under the new file's checksum, a mix that survives restarts until the cache folder goes or a later update rewrites the file; on root a the restart recovered every race measured; and the window is wider than git's writes, below]** **[2026-11-24, lane-fix-c5d: "on root a the restart recovered every race measured" is false. 7 of lane-settle-c5d's 28 root-a races left a poisoned code-behind that still ran after two restarts (its sweep's S1-633 at one worker and four, S1-639 and S1-645 at one worker, `Service-player.js`; S1-650, `Service-sources.js`; U-639, `Service-rewind.js`; U-645, `Service-sources.js`), and recheck-c5ds-measure added 3 of its 22 fired at `Service.qml` (A641-c4 and U649-c4, `Service-player.js`; U641, `Service-sources.js`): on root a a code-behind's unit, on root b `Service.qml`'s. The section "D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)" below]**
+
+### The rig
+
+**The root.** make-root.py cuts the host's own shell.qml (omarchy 4.5.0-3,
+sha256 d6d99af1..., pinned) by line range, byte for byte:
+- Kept: lines 1-23, 27-241, 279-1093, 1102-1591 and 1747-1939. They hold
+  the config FileViews and Component.onCompleted, the plugin API factories,
+  ensureService (930), _syncServices (982), unloadPluginServices (1062),
+  summon (1181), the panel Instantiator with the keepLoaded overlay's
+  asynchronous Loader (1387), syncPluginWidgets (1446), reloadPlugins
+  (1517), finishPluginReload (1529), the localPluginChanged and
+  scanFinished Connections (1539), loadPluginWidget (1566), and the `shell`
+  IPC target: rescanPlugins (1796), setPluginEnabled (1815, what
+  omarchy-plugin-disable calls) and enablePlugin (1819).
+- Left out: 24-26 (AppLibrary, BrightnessKeys, BackgroundIntro), 242-278
+  (the session's bar), 1094-1101 (the AppLibrary Connections) and 1592-1746
+  (global shortcuts, the omarchy-shell socket, the image-selector IPC).
+- Adapted, two lines, each marked `RIG ADAPTATION` in the output:
+  - shell.qml 165 points `firstPartyDir` at an empty folder, so no
+    first-party plugin or service starts.
+  - PluginRegistry.qml 708-715, the orphan reaper (a `pgrep -f` over every
+    inotifywait on the machine), becomes `["true"]`.
+- Unchanged: the folder watcher (PluginRegistry.qml 726-745, `inotifywait
+  -m -r` on the plugins folder) and its 150 ms debounce (shell.qml 69-73).
+- Root a carries the host's `//@ pragma OmarchyLoadPatch` and root b does
+  not.
+- The rig's own block, rig.qml.in, does three things. It hosts the bar
+  widget the way Bar.qml's WidgetHost does: a Loader on
+  `barWidgetRegistry.widgets[id].component`, with the host's
+  Ui/PluginBarApi.qml as `bar`. It logs the host's events on a millisecond
+  clock. It answers `rig marks` over IPC.
+
+**The launch.** The live launcher's way (omarchy-launch-shell):
+`QS_DISABLE_FILE_WATCHER=1 QS_NO_RELOAD_POPUP=1 quickshell -n -p
+<root>/shell`, with OMARCHY_PATH at the rig's root.
+- It runs in one nested headless cage (cage 0.3.1, pixman, no input
+  devices) on private-bus.sh.
+- Every quickshell runs under gdb with `handle all nopass`.
+- HOME, the XDG folders and the QML cache are decoys.
+- hyprctl and omarchy-notification-send are logging stand-ins.
+- IPC is addressed by `--pid` only.
+- No player was started: the service's start-up probes found none on the
+  private runtime.
+
+**The install.** The plugin goes in the way omarchy-plugin-add installs it
+(11-12, 119-147): `git clone` into `plugins/.add.tmp.$$`, then
+omarchy-plugin-validate, then `mv` into place. The clone is made from a
+scratch bare upstream whose `main` a publish moves with update-ref. The bar
+entry names a three-channel playlist file and sets `refreshMinutes: 120`.
+
+**The update.** omarchy-plugin-update's update_one runs by argv with its
+two exports (9-10, 43-75): `fetch --quiet origin HEAD`, the HEAD and
+FETCH_HEAD comparison, `merge --ff-only FETCH_HEAD`, then validate. The
+host's watcher then reloads on its own. Then comes rescanPlugins (the
+update's 131) over `quickshell ipc --pid`, and then the guide is summoned.
+
+**The builds** (candidates.py). Each is committed onto the last with
+`commit-tree -p`, as release.py does.
+
+| build | commit | what it is | version |
+|---|---|---|---|
+| C0 | 1321aff | local `main`, 0.20.0, one Service.qml | 0.20.0 |
+| C1 | 79594ed | 3200d22's ALLOWLIST export by release.py's own build_tree, plus the marks | 0.99.0 |
+| C2 | 34230d8 | C1 with Service-player.js's socketAttached renamed socketAttachedLive, and Service.qml's forwarder calling the new name | 0.99.1 |
+
+- C1 sets the version in manifest.json, model/build.mjs and README's status
+  line, the three places release.py check holds equal. Its X.Y.Z reading
+  refuses the brief's suggested `0.21.0-reloadtest`.
+- The marks, in C1 and C2: Service.qml's `reloadMarks()` returns its own
+  mark and each code-behind's `reloadMark()`, and Guide.qml and
+  BarWidget.qml each carry a `reloadMark` property. C0 has none, and that
+  absence is its mark.
+- C2's rename means a C2 Service.qml over a C1 Service-player.js, or the
+  other way round, throws on every call, and the `status` reply makes that
+  call.
+- release.py check is green on both sources, 47 files.
+
+The rig also reads each running object's QML type name. A component
+compiled again gets a new `_QMLTYPE_` number within a process. **[2026-11-24, lane-settle-c5d: unverified: no recompile was reached within a process, and across one a new text kept its number (Guide_QMLTYPE_121 for C1 and then C2) while the same stale text got a new one (Service_QMLTYPE_146 then 148). The verdicts rest on the marks]**
+
+### The arms
+
+Every arm ran on 2026-11-24. The crash journal read 89 before and after
+every shell, and gdb reported no signal in any run. "Plugin log" counts the
+lines from the plugin's files after start-up, which logs the config shield,
+the bar-entry migration and the scanner's module-path line (root a only).
+
+| arm | root | update, mode | after the watcher's reload and rescanPlugins | after the guide opens | then | plugin log |
+|---|---|---|---|---|---|---|
+| a-01-r, b-01-r | a, b | C0 to C1, restart | service, guide, bar all C0 (no marks), the same `_QMLTYPE_` 142, 121 and 78 as before the update | running 0.20.0, onDisk 0.99.0, stale true; footer "Updated · restart the shell to see the new version" | restart: all five service marks C1, Guide and Bar C1, ready, 3 channels, favorites ['t:one'], bar entry refreshMinutes 120 | none |
+| a-12-r, b-12-r | a, b | C1 to C2, restart | all five service marks C1, Guide and Bar C1, types unchanged (146, 121, 78) | running 0.99.0, onDisk 0.99.1, stale true, the footer | restart: all C2, ready, 3 channels, favorites and refreshMinutes kept | none |
+| a-01-t, b-01-t | a, b | C0 to C1, two toggles | as a-01-r | as a-01-r | each enable: C0's Service_QMLTYPE_142 again, ready, 3 channels, the footer; the second after gc and 8000 never-seen loads the same | none |
+| a-12-t, b-12-t | a, b | C1 to C2, two toggles | as a-12-r | as a-12-r | each enable: Service_QMLTYPE_146, all five marks C1, ready; the second after the release the same | none |
+| a-12-w-c4, b-12-w-c4, a-12-w-g4 | a, b, a | C1 to C2 at four workers | as a-12-r | as a-12-r | (write order, below) | none |
+
+### Q1 and Q2: an update, kept running
+
+What runs after the update, for C0 to C1 and C1 to C2 alike, in both
+roots, after the watcher's reload and again after rescanPlugins: the old
+build everywhere.
+- The service is the same object. It is keepLoaded, so
+  unloadPluginServices carried it over and `_syncServices` handed it the
+  new manifest.
+- The guide is a new item made from the cached component: the same
+  `_QMLTYPE_`, the old mark.
+- The bar is a new item made from the re-registered cached component, with
+  the old mark.
+- For C1 to C2 the service ran "C1 Service.qml, C1 Service-pip.js, C1
+  Service-player.js, C1 Service-rewind.js, C1 Service-sources.js", so no
+  file mixed. No TypeError appeared although C2's forwarder renames the call
+  on disk.
+
+What was logged: nothing from the plugin's files at either reload, in
+either root. There was no warning, no JS error, no `Script ...
+unavailable` and no `File name case mismatch`.
+
+What the plugin showed (D-HOST-1):
+- Before the guide opened, `status` read build running and onDisk alike
+  (0.20.0, or 0.99.0). The replaced manifest's watch never fires (D-HOST-2).
+- When the guide opened, recheckBuild re-read the manifest: onDisk became
+  the new version, stale true, and the footer read "Updated · restart the
+  shell to see the new version".
+
+After a restart everything ran the new build and was clean:
+- all five service marks new, and Guide and Bar new;
+- `status` ready with three channels;
+- the starred channel kept (state.json favorites ['t:one'], sources
+  ['play.m3u']);
+- the bar entry's refreshMinutes 120 kept;
+- only the usual start-up lines in the log.
+
+### Q3: a disable and an enable, without a restart
+
+After each update the rig disabled and enabled the plugin the host's way:
+setPluginEnabled false, then enablePlugin with `{}`. It did this twice.
+Each new service instance ran the OLD build's text in Service.qml and in
+every code-behind:
+- C0 to C1: Service_QMLTYPE_142 with no marks, C0's Service.qml.
+- C1 to C2: Service_QMLTYPE_146, all five marks C1.
+
+Nothing mixed. Each instance ran: ready, three channels, the footer. It
+logged no error and did not crash. C1's Service, destroyed with its
+code-behinds alive (D-REL-15's case), was destroyed by each disable in
+a-12-t and b-12-t (four times) and at every C1 or C2 shell's exit, with no
+fault and the journal unchanged.
+
+The second disable and enable came after the old instance could have been
+released. Before the second enable the rig did three things:
+- It collected garbage.
+- It loaded 8000 components the type loader had never seen, 500 per call.
+- It made and let go a control, a component of the rig's own, then
+  rewrote the control's file.
+
+The enable still made `_QMLTYPE_` 142 or 146 with the old marks. The control
+came back as its first type with its first text (`Probe_QMLTYPE_171 v=one`
+or `_175 v=one`, before and after, in all four arms). So no path this rig
+drove released a component once it was loaded. D-REL-6's mixed shape, a
+cached file beside a fresh one, was not reached by an update, a reload or a
+toggle. Why the engine keeps the component was not read in the Qt sources
+here.
+
+Two side observations from the toggle arms:
+- The host's disable removes the bar entry. The enable then puts back
+  `{id}`, so refreshMinutes went from 120 to 360 (the default). That is
+  D-QA-17's known behaviour. The playlist survives because start-up had
+  already moved it into state.json.
+- After an enable the bar widget loaded before the service existed. Its
+  resolve timer found the service within the next two seconds
+  (`bar.service` false at the enable, true at the open), as designed.
+
+### Q4: D-REL-9's window
+
+The update's git step was run under the host's live folder watcher. A
+watch on the plugins folder timed every create and close on the clock the
+rig's events use.
+
+**At one checkout worker (git's default).** There were 14 writes: 8
+updates and 6 half-tree completions. Every working-tree close came in index
+order:
+BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js,
+Service-rewind.js, Service-sources.js, Service.qml, manifest.json,
+model/build.mjs, among the files named. Each code-behind closed before
+Service.qml was created. The writes spanned 5.3-5.8 ms of a 38-47 ms merge,
+with no gap between two writes above 1.4 ms.
+
+**At four workers.**
+- With `-c checkout.workers=4 -c checkout.thresholdForParallelism=1` on the
+  merge (2 runs) the closes interleaved. Service.qml was created before
+  Service-rewind.js closed in a-12-w-c4, and before Service-player.js and
+  Service-rewind.js closed in b-12-w-c4. **[2026-11-24, lane-settle-c5d: "created" is the CREATE of a file still being written, not a finished one. Read off this record's own close orders, Service.qml closed after every code-behind in all three runs (last in a-12-w-c4 and a-12-w-g4, eighth of nine in b-12-w-c4), and every one of the settle's 15 four-worker runs unlinked every changed file before any create, 3 of them passing through h4's shape]** The writes took 7.4-8.4 ms, with
+  gaps up to 3.9 ms.
+- With the same two settings in the decoy HOME's `~/.gitconfig` (a-12-w-g4,
+  1 run) the order left index order: manifest.json and model/build.mjs
+  closed before Service-player.js. So the user's setting reached the
+  update's git. In that run Service.qml happened to close last, and the
+  writes took 10.7 ms with a gap of 5.4 ms.
+
+**What the host's scripts pass to git.** Read in omarchy-plugin-update
+9-10, 43-75 and 131, and omarchy-plugin-add 11-12, 119-147.
+- No `-c` option, and only two exports: `GIT_TERMINAL_PROMPT=0` and
+  `GIT_SSH_COMMAND` (default `ssh -oBatchMode=yes`).
+- HOME, XDG_CONFIG_HOME and every `GIT_CONFIG_*` are left alone. So
+  `~/.gitconfig`, `$XDG_CONFIG_HOME/git/config` and `/etc/gitconfig` all
+  apply. The user file was measured; the system file was read, not run.
+- The update writes in place twice: the merge, and on a failed validation
+  its rollback `git reset --hard ORIG_HEAD` (73).
+- The add has no window. It clones into a hidden staging folder, which the
+  watcher ignores (PluginRegistry.qml 798), and moves it into place.
+
+**Does any load or reload the host would make read a half-written tree?**
+No.
+- In all 17 writes (14 at one worker, 3 at four) the watcher's
+  localPluginChanged events arrived during the writes, and each one
+  restarted the 150 ms debounce.
+- reloadPlugins began 150.6-154.5 ms after git's last write, and its scan
+  about 10 ms later (46 ms once).
+- Every reload served cached components. The only plugin file a reload
+  reads is manifest.json, which the scan's bash reads, after the last
+  write.
+
+So the window is git's 5-11 ms of writes, and nothing the host does on its
+own reaches it. **[2026-11-24, lane-settle-c5d: the first half is too narrow. What a cold load mixes is set by when the shell reads each file, not by git's span alone: on root a the load patch's scanner reads Service.qml about 0.66 s before the engine reads the code-behinds, so a merge anywhere in that interval mixes them at one worker or four; on root b the reads are 5-16 ms apart, and the engine holds Service.qml's text 75-106 ms before it saves its compiled unit, which is the window the cache poisoning needs. The second half stands]** A load that is not served from the cache does reach it: a
+shell starting (or relaunched by omarchy-launch-shell) or a plugin loaded
+for the first time while git writes. How often that happens was not
+measured.
+
+**What the half state does.** These trees were made by hand, each a shape
+the measured order passes through. **[2026-11-24, lane-settle-c5d: h1 and h0 are, and h4's occurred in 3 of the 15 four-worker runs lane-settle-c5d measured, for 0.1-1.1 ms each (`Service.qml` closed before `Service-player.js` or `Service-rewind.js` was created or closed), and in none of the six before, and the h1 tree took only the four code-behinds from the new build where one worker has by then also written BarWidget.qml, Guide.qml and README.md. The rig's h1 now takes every changed file that sorts before Service.qml, and the re-run gave the same mix with C2's guide and bar]** The shell was started cold on it. The
+tree was then completed with `git reset --hard FETCH_HEAD`, the update's
+own rollback verb run forward, under the live watcher. Then came
+rescanPlugins, a disable and an enable, and a restart.
+
+| arm | half tree (the window it stands for) | cold start | the watcher's reload, rescanPlugins, disable and enable on the completed tree | restart |
+|---|---|---|---|---|
+| a-12-h1, b-12-h1 | C2's code-behinds beside C1's Service.qml (one worker: the code-behinds written, Service.qml not yet) | a MIX: "C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js"; `status` throws "TypeError: Property 'socketAttached' of object [object Object] is not a function" | the same mixed type (146) every time; after the completion the guide's footer reads "Updated" (manifest 0.99.1, model 0.99.0) | all C2, ready, 3 channels |
+| a-12-h4, b-12-h4 | C2's Service.qml with Service-player.js not there (four workers) | no service: "service plugin load failed ... Service.qml:16:1: Script file://.../Service-player.js unavailable" (root a: `qs://.../Service.qml`); guide and bar load without it, footer empty | the host retried at every scan and at the enable (1, 1 and 3 warnings), and each retry failed with the same line | the service loads, C2 |
+| a-01-h4 | C1's Service.qml with no code-behind yet (the first release at four workers) | no service: "Script file://.../Service-pip.js unavailable", and on root a the scanner's "Ignoring unresolvable import" once for each of the four | as h4 | the service loads, C1 |
+| a-01-h0 | C0's tree with Service.qml unlinked (git between unlink and write, any worker count; 0.20.0's own updates have it) | no service: "Service.qml: No such file or directory" | as h4 | the service loads, C1 |
+
+Three things the half-tree arms show:
+- The host does retry. ensureService runs from `_syncServices` at every
+  scan and at the enable, but each retry gets the component the engine kept
+  from the first load, failed or mixed. No reload recovers, and only a
+  restart did. **[2026-11-24, lane-settle-c5d: on these hand-made trees, which were static before the shell compiled them. A real race on root b poisoned the disk cache in 4 of 4 races here and 3 of 3 in the recheck, and restarts did not recover it]** **[2026-11-24, lane-fix-c5d: and on root a too, for a code-behind: 7 of the settle's 28 races and 3 of recheck-c5ds-measure's 22, past two restarts]**
+- The restart after h4 and h0 read 0 channels. The service had never run,
+  so the bar entry's playlist was never migrated, and the toggle's disable
+  then dropped it (D-QA-17). That is an artifact of the arm's fresh install,
+  not of the reload.
+- In h1 nothing tells the user before the tree completes, because the model
+  and the manifest on disk agree.
+
+### Q5: what code-behinds change, found along the way
+
+- **The shapes a cold load can hit.** 0.20.0's one-file service could meet
+  only h0's moment, plus the model's mismatch D-REL-9 already records. With
+  code-behinds, one checkout worker's index order (code-behinds before
+  Service.qml) is exactly what makes h1's mix possible whenever a release
+  changes a function across Service.qml and a code-behind. At four workers
+  h4 becomes possible too. **[2026-11-24, lane-settle-c5d: and seen: its shape occurred in 3 of the 15 four-worker runs lane-settle-c5d measured, for 0.1-1.1 ms each (`Service.qml` closed before `Service-player.js` or `Service-rewind.js` was created or closed), and in none of the six before. Four workers' longer window is h0. And on root a, where the scanner reads Service.qml long before the code-behinds, h1's mix needs no particular worker count]** The first release adds four files, so at four
+  workers its Service.qml can exist with no code-behind at all.
+- **The load patch follows the imports.** Under the pragma Service.qml
+  compiles as `qs://` and its code-behinds as `file://`. The error line
+  shows both: "qs://.../Service.qml:16:1: Script file://.../Service-player.js
+  unavailable". The patch's scanner still reads Service.qml's script imports
+  and logs a missing one as "Ignoring unresolvable import", so on root a a
+  missing code-behind is reported twice.
+- **The rig's own hazard (F-HARNESS-131, filed below).** During
+  development one arm's shell was ended by gdb (below), and the host's
+  watcher, a child of that shell, survived it. The host's own comment,
+  PluginRegistry.qml 694-699, says it would. Because the run was started
+  as `flock -w 3600 <heavy.lock> ...`, the watcher had inherited the lock's
+  descriptor. It held the heavy lock for about twenty minutes, keeping
+  another lane's node run and this lane's next run waiting, until this lane
+  found it through /proc and ended it by its pid and command line. The rig
+  now records the watcher's pid as soon as the service is up and stops it
+  with the shell, and it is run under `flock -o`.
+- **Also seen, no id.** Under `handle all nopass` a SIGPIPE stops the shell
+  and gdb's `kill` ends it. It happened once, when a `quickshell ipc`
+  client was timed out after 15 s while the shell was still writing its
+  reply to a 4000-component call. It is not a crash, and the journal did not
+  move. The rig batches those calls and gives them a minute. A rig that
+  times out an IPC client under this gdb line should expect the same.
+
+### Not measured
+
+- **The host's whole shell.** That means the bar, the other plugins and the
+  first-party services, which `firstPartyDir` kept out. A real shell loads
+  hundreds more types, and whether its engine ever releases a plugin's
+  component over a long session was not reached.
+- **Any player.** Nothing played, attached or zapped, so the old and new
+  player code-behinds' socket paths ran only their start-up probes.
+- **A cold start racing a real update.** The half trees were made by hand.
+  Their shapes are the ones the measured order passes through, and their
+  timing is not git's. **[2026-11-24, lane-settle-c5d: h1's and h0's shapes are, and h4's occurred in 3 of the 15 four-worker runs lane-settle-c5d measured, for 0.1-1.1 ms each (`Service.qml` closed before `Service-player.js` or `Service-rewind.js` was created or closed), and in none of the six before. A cold start racing a real update is measured since, by the rig's race arm: QA-RESULTS "D-REL-14: call (d), settled (lane-settle-c5d, 2026-11-24)"]**
+- **How often a cold start falls inside the window.**
+- **root b's h0 and first-release h4.**
+- **`/etc/gitconfig`**, which was read, not run.
+- **Why no component is released**, which was not read in the Qt 6.12
+  sources.
+
+### Filed
+
+- **D-REL-16** (P3, release) is a shell that loads the plugin while an
+  update is writing it. It keeps what it read until it restarts **[2026-11-24, lane-settle-c5d: or, on root b, past restarts, through Qt's disk cache; QA-RESULTS "D-REL-14: call (d), settled (lane-settle-c5d, 2026-11-24)"]** **[2026-11-24, lane-fix-c5d: on either root: `Service.qml`'s unit on root b, a code-behind's on root a (7 of the settle's 28 root-a races, 3 of recheck-c5ds-measure's 22)]**: a mixed
+  pair (h1) or a failed load (h4, h0). The host's retries get the same
+  component back. Code-behinds widen what it can read (h1 at one worker
+  for a change across the pair, h4 at more). Sibling search, by shape:
+  every place the plugin's files are read while an update could be writing
+  them.
+  - The three entry points and their imports. These are read only at a
+    component's first compile: this finding.
+  - manifest.json, read by the registry's scan. The scan comes after the
+    debounce, measured above.
+  - manifest.json, read by the service's FileView through recheckBuild. A
+    half-written file reads as `""`, and staleBuild answers false then
+    (D-HOST-1's "cannot tell").
+  - The helper's parts, read at each spawn. The stub's part table refuses
+    a mismatched part as `helper_damaged`, and D-REL-7's robustness lens
+    raced 6,851 spawns against updates.
+  - Nothing else in the plugin folder is loaded.
+
+  The ordinary update path does not reach it, so no shipped file changes
+  here. The options and their costs are in the lane's result for the lead.
+- **F-HARNESS-131** (P3, harness) is `flock -w N <lock> <cmd>`, the heavy
+  lock's idiom in the lane briefs. It hands the lock's descriptor to every
+  process `<cmd>` starts, so a descendant that outlives the run (a shell's
+  watcher, a detached helper, a player) holds the lock and every other lane
+  waits on it. It was seen for about twenty minutes. This rig is run with
+  `flock -o` and records the watcher early, and the briefs' idiom is the
+  lead's to change. Sibling search: no committed script runs `flock` itself
+  (a grep of scripts/, tests/ and the docs). The idiom lives in the
+  workflow briefs.
+
+## D-REL-14: C5, the documents (lane-c5-docs, 2026-11-24)
+
+C5 is D-REL-14's documents. lane-c5-docs wrote them on branch c5-docs from
+3200d22 (20113e8, 31f61dc, 1f6275f, a6ae342). lane-join-c5d merged reload-d
+(call (d), the section above) and then c5-docs into branch c5d, each with
+`git merge --no-ff`. Neither merge conflicted: the two branches touch no
+file in common. The join wrote SERVICE-SPLIT.md's section on updates from
+call (d)'s measurement, corrected two comments to it, and wrote these
+records. Nothing was pushed, and no tag moved. Every count below is from
+c5d unless it says 3200d22.
+
+### What was written
+
+- **docs/SERVICE-SPLIT.md**, new, written the way HELPER-SPLIT.md is. It
+  covers:
+  - why: the ceiling, and Service.qml's size from v0.14.3 to 3200d22, in
+    eight rows;
+  - the three designs, and the fallback that was taken;
+  - the layout of the five files, with their bytes and function counts;
+  - what stays on the root, and why;
+  - how a code-behind runs: its scope, the host's load patch, the
+    forwarder's exact form and the inline view, with the judge's, Part A's
+    and C3's and C4's measurements, naming the code-behind each live mutant
+    was in;
+  - the one list and its readers;
+  - every refusal of `split-service.py --check`, the readers' 12 kinds and
+    the judge's 9, each with what it keeps true, and `--cut`'s;
+  - the closure rule (D-REL-15);
+  - editing, moving a function and adding a code-behind;
+  - how qmllint sees the service (F-GATE-29), and how the node harness runs
+    it;
+  - **Updates and hot reloads across a version change (call (d))**,
+    written by the join and summarised below;
+  - the history (C1 to C5, call (d) and D-REL-15, with their commits);
+  - what is not measured, narrowed by the join to what call (d) left open.
+- **The updates section.** Every claim in it is call (d)'s measurement, or
+  is marked read:
+  - what a running shell does after `omarchy plugin update`: the old build
+    runs, whole, through the watcher's reload and a rescan. That covers the
+    kept service object, the guide and the bar made from the cached
+    components, and the model, whose `Model.PLUGIN_VERSION` the status
+    reads as `build.running`. The footer reads "Updated" once the guide
+    opens.
+  - what a disable and an enable does: it makes the old build's service
+    again, twice, even after gc and 8,000 new loads.
+  - D-REL-9's write order, in a table: at one worker, index order with the
+    code-behinds before `Service.qml`; at four workers, by `-c` or by
+    `~/.gitconfig`, interleaved. What the host's scripts pass git is read,
+    not measured.
+  - what reads the window: no reload, but any cold load.
+  - the four half trees, h1, h4, the first release's h4, and h0, in a
+    table;
+  - what a user must do: restart after an update, as the README and every
+    release's notes already ask **[2026-11-24, lane-settle-c5d: not every release's: of CHANGELOG.md's 46 sections, 13 ask for the restart, 0.13.4 to 0.14.2 and 0.15.0 to 0.20.0; 0.14.3's do not, 0.13.3's say no restart is needed, and none from 0.1.0 to 0.13.2 does (0.7.4 and 0.7.5 explain that the interface changes only at a restart)]**. A disable and enable is no substitute, and
+    a second restart is needed after a cold load inside the window
+    (D-REL-16).
+  - that no fix was made; whether that meets call (d) is the lead's call.
+- **docs/ARCHITECTURE.md**:
+  - section 9 gains "The service's code-behinds (D-REL-14)", seven rule
+    bullets beside the model's and the helper's;
+  - section 4 gains a `Service-<domain>.js` row;
+  - section 10's QML static row gains `scripts/check.sh --qmllint-view
+    Service.qml`;
+  - decision 8 gains two dated brackets: the code-behinds' restart (lane
+    c5-docs), and call (d)'s finding that the restart is not keepLoaded's
+    cost alone (the join).
+- **The plans.** Each of these reads the code-behinds now, with a dated
+  bracket:
+  - QA-PLAYER PLY-STOP-11, PLY-SOCK-02, PLY-SVC-02 and PLY-SVC-07;
+  - QA.md TC-INST-04, SEC-07's sink grep (75 of the 183 lines its pattern
+    matches in the service were in the code-behinds on 3200d22), and a lint
+    line for the view's door;
+  - PLAN-M2 MR1, rule 8 and MR12.
+- **scripts/split-service.py**'s docstring points at the document.
+- **Service.qml**'s header, comment lines only:
+  - lane-c5-docs named the four code-behinds and the forwarder rule;
+  - the join replaced "keepLoaded: edits to THIS file or to its
+    code-behinds only apply after `omarchy restart shell`" with what call
+    (d) measured **[2026-11-24, lane-settle-c5d: re-worded and extended it: the sentence that edits apply only after `omarchy restart shell` stands, and keepLoaded is now one of two reasons, with the engine's kept component beside it]**. keepLoaded carries the object over the host's reload,
+    and the engine keeps the component it first compiled. The host's
+    reload, a rescan and a disable and enable all ran the build first
+    loaded, this file and every code-behind together, and the guide and
+    the bar with them. The new lines hold no `{`, which would end the
+    header test_host_load_patch.py reads.
+- **README.md's development line** **[2026-11-24, lane-settle-c5d: a bullet of the Troubleshooting list (README 1779-1785 at d52f462), not the "## Development" section, which nothing changed]**. lane-c5-docs named the code-behinds.
+  The join added `Guide.qml`, `BarWidget.qml` and the model, and replaced
+  "(kept-loaded services do not hot-reload)" with the measured reason: the
+  running shell keeps the code it loaded first, and the plugin reload, a
+  rescan and a disable and enable all bring back the same build. The line
+  names no docs/ path.
+- **The rig's record.** The join corrected one figure in
+  RESULT-2026-11-24.txt's summary, with a bracket. It said the one-worker
+  writes spanned 5.3-6.1 ms, and its fourteen one-worker runs, as printed
+  below it, read 5.3 to 5.8 ms. The runs themselves are unchanged.
+
+### Proof that the service changed in comment lines only
+
+- `git diff -U0 3200d22 -- Service.qml Service-*.js` has 0 added or
+  removed lines that are not `//` lines.
+- The inline views of 3200d22 and c5d, read through the tree's own
+  readers, are 449,007 and 449,758 bytes. With every `//` line dropped they
+  are 4,454 lines each and equal (lane-c5-docs's comparison script, run by
+  the join).
+- Shown red: one property line added to a scratch copy reads 4,454 against
+  4,455, DIFFER.
+- `split-service.py --verify --from-git 3200d22` is red, as it should be,
+  at byte 2049, line 38 of the view, the header: 449,758 bytes against
+  449,007.
+
+### Searched and cleared (rule 15)
+
+lane-c5-docs searched docs/ARCHITECTURE*.md, UX*.md, QA*.md (not
+QA-RESULTS) and PLAN-M2.md. That covered every `Service.qml` mention, about
+231, and greps for line citations, one-file wording, and "comment/text/body
+of Service.qml".
+- **Fixed**, the category being a present-tense statement that treats
+  Service.qml as the whole service, or a grep criterion over Service.qml
+  for a moved body: the rows listed above.
+- **Cleared:**
+  - 34 `Service.qml:NNN` line citations in ARCHITECTURE-PLAYER,
+    ARCHITECTURE-SOURCES, QA-PHASE3, QA-PLAYER and QA-HEADLESS. These are
+    design-time or dated records, and their numbers were stale before the
+    split.
+  - Dated round and lane records, among them ARCHITECTURE-SOURCES's "the
+    ONLY updateEntryInline call in Service.qml". The node pin counts that
+    over the inline view, so it is still true of the service.
+  - Mentions of a member, an object or a property, which stay true through
+    the forwarder or stay on the root.
+  - The historical lane-ownership tables, and the host's own
+    notifications/Service.qml.
+  - Comments deferring to C5: the only one is in this file's earlier
+    sections, which stay as dated records.
+
+The join searched two more shapes.
+- **"Only the service needs a restart."** Call (d) shows the restart is
+  the engine's component cache's, not keepLoaded's alone.
+  - Corrected: the README's development line and Service.qml's header.
+  - Bracketed: ARCHITECTURE decision 8.
+  - Cleared:
+    - model/build.mjs's D-HOST-1 comment already says the overlay and the
+      bar are rebuilt from the cached old components (D-REL-6's closure),
+      and call (d) measured the same on Quickshell 0.3.2.
+    - PLAN-M2 MR1 and rule 8 speak of the service only, which stays true.
+    - The README's Updating paragraph says the shell "keeps the background
+      service it already loaded until it is restarted" and asks for the
+      restart. That is true, but it names only the service, and it lies
+      outside the join's README scope; it is proposed to the lead.
+    - CHANGELOG.md has no unreleased section to carry it.
+- **A grep criterion over `bin/omarchy-iptv` alone**, the stub since
+  D-REL-7. lane-c5-docs proposed this shape; the join searched it in every
+  docs/*.md but QA-RESULTS and STATUS, for each line that names both `grep`
+  and `bin/omarchy-iptv` and not `bin/helper`.
+  - Found: QA.md SEC-07 (its pattern matches 9 lines in the stub and 133
+    in the parts), QA-PLAYER PLY-SVC-07 (`playSeq`, 0 and 2) and
+    PLY-SEC-17 (`^import |^from `, 2 and 33). **[2026-11-24, lane-fix-c5d: lines that grep matched, not the helper's imports: by an AST walk the stub holds 8 import statements and the helper 112, 77 of them inside functions, which a line grep cannot see (F-GATE-30)]**
+  - Cleared:
+    - ROADMAP-PROPOSED's dated "`grep -n player_api bin/omarchy-iptv`
+      returns nothing", which the parts do not contradict: 0 matches there
+      too.
+    - QA-HEADLESS's and QA-SOURCES's lines, which run the helper or match
+      its process; they do not grep its code.
+    - CLEANUP-PLAN's dated line citation.
+  - With ARCHITECTURE section 4's "the mpv `Process`", filed as D-DOC-37.
+    Service.qml holds no Process that runs mpv: its only mpv argv is
+    `which mpv`.
+
+### Checks, on c5d against 3200d22's counts
+
+- `scripts/release.py check`: 47 files, 26 runtime sources, the largest
+  `Guide.qml` at 310,448 of 458,752 B (base 47).
+- `scripts/split-service.py --check`: 5 files, 4 code-behinds, 47 root
+  functions, 158 forwarders, 2,268 sites, 2 uses of the root whole, 34 of
+  34 cases (the base's, identical).
+- `scripts/check.sh --qmllint-view Service.qml`: 0 errors, 46 warnings +
+  387 on Model members. `--qmllint-file Service.qml`: 0 errors, 9 + 134.
+  Both are the base's.
+- `scripts/check-readme-notices.py`: 46 quotes, 31 joined (24 exact, 2
+  composed, 5 elided), 15 skipped, 0 problems (the base's).
+- `node tests/Model.test.js`: 4,073 checks, 0 failures, and 4,073 with
+  IPTV_HARNESS_OWN_ECHO=none (base 4,073 and 4,073).
+- Python by discovery: 3,033 (base 3,033).
+- The python modules that read the changed files, found by grepping tests/
+  for their names (README.md, Service.qml, Service-, ARCHITECTURE.md,
+  QA.md, QA-RESULTS, STATUS.md, split-service, spikes), minus
+  test_host_load_patch: 53 modules, run under the heavy lock. Ran 1,593
+  tests, OK, with 1 skipped: test_playlist's standing skip for D-PERF-13.
+  test_split_service alone ran 39, OK.
+- test_host_load_patch.py was not run, because it starts plain qml under a
+  core limit only. It copies Service.qml's header into its probes, and the
+  header still ends at `Item {` (line 51) **[2026-11-24, lane-settle-c5d: line 55 on d52f462, 50 on a6ae342]**, the first line holding a `{`, as
+  it ended at line 43 on 3200d22. The lead's gate runs it. The QML spec and
+  scripts/qa-lib-test.sh were not run: no file they read changed in
+  anything but comments or documents.
+- `scripts/check-defect-ledger.py`: 805 rows on the board, 805 ids across
+  630 tracked files, 58 of them markdown, 0 problems. The rows were 804
+  after reload-d; D-DOC-37 is the 805th.
+- `scripts/check-board-staleness.py`: 805 rows, 7 bare-open, 37 commit
+  fix-claims, 0 disagreements.
+- `scripts/check-sr-register.py`: 40 rows, 455 citations in 39 files, 0
+  problems.
+- `scripts/check-double-encoding.py`: 630 files, 0 problems.
+- The byte scans (`check.sh --byte-scan`): ascii, 567 files; control, 539
+  files; both ok (3200d22: 560 and 532, with reload-d's seven rig files
+  added).
+- `scripts/check-marketplace-capabilities.py`: 220 files, 72,468 commands,
+  0 capability hits.
+- The reload rig has no check mode of its own. `bash -n run.sh` is clean,
+  and its four python files parse. `make-root.py` built both roots on this
+  host: the sha256 pins held, root a's first line is the pragma and root
+  b's is not, and each root's shell.qml and PluginRegistry.qml carry one
+  `RIG ADAPTATION` line. `run.sh` on a PATH without gdb refused with
+  "refused: gdb is not installed", rc 2, before it started anything.
+- The private-id scan of the commit range: 0.
+- The crash journal read 89 at the start, after every run and at the end.
+  The join started no Qt process.
+
+### Filed
+
+- **D-DOC-37** (P4, docs), from lane-c5-docs's proposal, with PLY-SEC-17
+  added by the join's search. ARCHITECTURE.md section 4 says Service.qml
+  owns "the mpv `Process`". Three plan greps, SEC-07, PLY-SVC-07 and
+  PLY-SEC-17, read the helper's stub alone. Each is open, with its counts on
+  the row.
+
+Left out, and why:
+- lane-c5-docs's item 4 says of itself that it is not a finding: two runs
+  it did not repeat.
+- lane-reload-d's two brief nits. release.py check refusing a suffixed test
+  version is its X.Y.Z reading working as designed, not a defect. A SIGPIPE
+  ending a shell under `handle all nopass` is a property of the brief's gdb
+  line, recorded in the section above with no id; it is a line for the
+  lead's briefs.
+- lane-reload-d's own findings are already filed, as D-REL-16 and
+  F-HARNESS-131.
+
+## D-REL-14: call (d), settled (lane-settle-c5d, 2026-11-24)
+
+Branch c5d, from d52f462: lane-reload-d's call (d) and lane-c5-docs's C5,
+joined by lane-join-c5d, then read by three read-only rechecks, two of
+which blocked it. This lane measured what they found in the nested
+headless cage it held (no other display), every quickshell under gdb, on
+`scripts/dev-harness/private-bus.sh`'s private bus, and corrected the
+text. The crash journal read 89 at the start, after every run and at the
+end.
+
+**First: D-REL-16 is P2.** On root a, the host's own root today, a cold
+start racing a real update left Qt's QML disk cache holding a code-behind
+of the OLD build under the NEW file's checksum in 7 of 28 races (5 of the
+sweep's 24, 2 of 4 more), and that mix ran again after two restarts each
+time, until the cache folder was removed or a later update rewrote the
+file. Root b, an unpatched Quickshell, does the same for `Service.qml`
+itself (4 of 4 races here, 3 of 3 in the recheck). The lead's call L2 sets
+P2 for exactly this case.
+
+### The lead's calls (under the owner's standing authority of 2026-11-09)
+
+- **L1.** Call (d) is met for the ORDINARY update path: an update under a
+  running shell keeps the old build whole until a restart, and the restart
+  runs the new build clean (lane-reload-d's r arms, 8 of 8, and here
+  a-12-r and b-12-r again). The cold-load race is D-REL-16's, not a
+  blocker of call (d).
+- **L2.** D-REL-16 rewritten from the measurement, every root and outcome
+  as measured, below and on its row; P2, because a race on root a survived
+  a restart.
+- **L3.** The chosen next step, NOT in this lane: a build stamp in every
+  shipped QML and JS file the service, the guide and the bar load, folded
+  into D-HOST-1's `running`/`onDisk` reading, so that a mixed or
+  stale-cached build reads as stale and the guide's footer says so,
+  before the first release that ships a code-behind. Beside it, lane
+  reload-d's (a), a release-notes line, is the cut's to write (never
+  CHANGELOG.md here), and (c), upstream (an atomic plugin update in
+  Omarchy; Qt's save-time checksum), waits on the owner's word. Nothing was
+  drafted outward. What this lane measured bears on (b) as lane-reload-d
+  weighed it: the stamp does not "catch h1 only". On root b a mix survives
+  restarts, so no restart line can clear it, and in the first code-behind **[2026-11-24, lane-fix-c5d: and on root a for a code-behind (7 of 28 here, 3 of 22 in recheck-c5ds-measure)]**
+  release's poisoned shape (C0's `Service.qml` beside C1's model)
+  `build.running` equals `onDisk` and `stale` is false, so D-HOST-1 says
+  nothing today.
+- **L4.** D-DOC-37 fixed, with the docs recheck's two plan criteria and
+  PLY-SVC-07's Expected; each re-graded criterion run before and after on
+  the tree and against a one-decision mutant (below).
+- **L5.** Service-rewind.js:138-140's comment corrected (a7c95bf).
+- **L6.** README.md: the Updating paragraph, and one Troubleshooting
+  bullet, the recovery having been measured.
+- **L7.** The rig's race arm and open watch committed, the h1 tree made
+  faithful, the h1 arms re-run.
+
+### The rig's race arm (L7)
+
+`scripts/dev-harness/spikes/codebehind-reload/` (81de1af, 4f21014,
+a86d1a4, c598733):
+- **`x`, the race.** The update's own `merge --ff-only` (with the arm's git
+  workers) fires when the starting shell first opens `RIG_RACE_FILE`
+  (default `Service.qml`), `RIG_RACE_DELAY_MS` after that open, from a
+  helper whose pid is recorded and whose inotifywait is bounded at 120 s.
+  The arm then reads the marks, opens the guide, restarts twice and, by
+  `RIG_RECOVER`, removes the QML cache's folder (`clear`) or publishes the
+  next build and updates under the running shell (`update`, which needs a
+  C3: candidates.py now builds one, C2 with only its marks and version
+  moved), and restarts once more. `RIG_QMLCACHE=xdg` starts the shell
+  without `QML_DISK_CACHE_PATH`, so Qt puts its cache where it does for a
+  user, in the decoy HOME.
+- **`cache.py`** reads every cache file it can map to a plugin file by
+  name: its `sourceTimeStamp`, its `sourceChecksum` against the MD5 of each
+  build's text and of the file on disk now, and which build's mark its
+  string table holds (UTF-16 or UTF-8; `model/build.mjs` by its version),
+  and gives a verdict: agrees, POISONED (the checksum is the disk file's
+  and names one build, the code another), or stale (the next load compiles
+  again). Every arm reads it after its cold start, a race arm after each
+  step.
+- **`watch.py opens`** times the shell's reads beside the write watch.
+  The open watch sees every open, git's too: git re-reads files it checks
+  before it overwrites them and after (inferred from opens that coincide
+  with the merge, not traced), so a "read" printed inside a merge's span
+  may be git's. The verdicts rest on the marks and on the cache files,
+  never on an open alone.
+- **h1** now takes every changed file that sorts before `Service.qml` in
+  byte order (the index's, which one worker writes in) from the new build,
+  deletes what the update deletes, and leaves `Service.qml` and what sorts
+  after it old: for C1 to C2 that is `BarWidget.qml`, `Guide.qml`,
+  `README.md` and the four code-behinds, where it took the code-behinds
+  alone.
+- **The write-order readout** prints each changed file's unlink, create
+  and close, and which of the moments h0, h1 and h4 the run passed
+  through, where it printed "Service.qml created before X closed", which
+  read a CREATE as a finished write.
+
+The runs, each under the heavy lock with `flock -o` and nice 10,
+`RIG_DEV=3200d22 RIG_C0=main`, builds C0 1321aff, C1 79594ed, C2 34230d8
+(the same three as lane-reload-d's and the recheck's), C3 9d60275; every
+run as printed is in `RESULT-2026-11-24-race.txt` beside the rig, less the
+lines its header names (the cage's warnings every start prints, and the
+cache lines of files the same in all four builds):
+- R1 at 81de1af: b-12-x, `RIG_QMLCACHE=xdg RIG_RECOVER=clear`.
+- R2-R5 at 4f21014: a-12-r b-12-r; b-12-x b-01-x (xdg, update); b-01-x
+  (xdg, clear); a-12-w-c4 b-12-w-c4 a-12-w-g4 a-12-h1 b-12-h1.
+- S1, the sweep, at a86d1a4: twelve invocations of a-12-x a-12-x-c4,
+  `RIG_RACE_FILE=Service.qml RIG_RECOVER=clear`, at delays of 615, 620,
+  625, 630, 633, 636, 639, 642, 645, 650, 655 and 665 ms.
+- U at a86d1a4 (U-633) and c598733 (U-639 to U-650; the two differ only by
+  run.sh's header comment): a-12-x, xdg, update, at 633, 639, 645 and
+  650 ms.
+
+### Q6: root b, the poisoned cache
+
+| run | race | at the race | after two restarts | the poisoned file, after the race and both restarts | recovered by |
+|---|---|---|---|---|---|
+| R1 | C1 to C2, merge at `Service.qml`'s first read | all C1 | C1 `Service.qml`, C2 code-behinds; `status` throws "TypeError: Property 'socketAttached' of object [object Object] is not a function" | `Service.qml`: checksum 39edcc28.. = C2's text = the disk's, code C1 | the cache folder removed, then a restart: all C2, ready |
+| R3 | the same | all C1 | the same | the same | the C3 update under the running shell, then a restart: all C3, ready |
+| R3 | C0 to C1, the same | C0 | C0's `Service.qml` (no marks) beside C1's model: `build.running` 0.99.0 = `onDisk`, `stale` false, ready, nothing shown | `Service.qml`: checksum 47d89e37.. = C1's text = the disk's, code C0 | the C2 update, then a restart: all C2 |
+| R4 | the same | C0 | the same | the same | the cache folder removed, then a restart: all C1 |
+
+What the cache files say, read by cache.py:
+- `sourceTimeStamp` is -1 on every unit, so all are in Qt 6.12's
+  content-hash mode, and a later load accepts a unit while its
+  `sourceChecksum` (bytes 28-43) is the MD5 of the file as it then reads.
+  The checksum of the poisoned unit is the MD5 of the NEW file, byte for
+  byte, and its string table holds the OLD build's mark (or, for C0, no
+  mark). The private header says why: `saveToDisk` "always stores the
+  unit in content-hash mode: it sets sourceTimeStamp to -1 and writes the
+  result of sourceChecksum() into the unit" (qv4compileddata_p.h 1642-1647),
+  and the checksum is computed when the unit is saved, not from the text
+  that was compiled.
+- When: on root b the engine read `Service.qml`, git wrote it 26.9-28.3
+  ms into the merge, and the unit was saved 82-106 ms after the read (R1,
+  R3, R4), once the imports had loaded. In a cold start with no race the save
+  came 75 ms after the read (b-12-r). A code-behind's unit was saved 1-10
+  ms after its read, before git's write: stale, so recompiled at the next
+  start, which is why only `Service.qml` stayed poisoned.
+- Where: with `QML_DISK_CACHE_PATH` unset, every cache file was in
+  `$XDG_CACHE_HOME/quickshell/qmlcache` of the decoy HOME (26 files on root
+  b, 23 on root a), one per source, named by the SHA-1 of the source's
+  local path, a dot, its suffix and a `c` (`.qmlc`, `.jsc`, `.mjsc`):
+  cache.py maps every file it found by computing that name. That is Qt's
+  own default, its cache location for the application name `quickshell`
+  plus `/qmlcache` (libQt6Qml holds the string `/qmlcache/` beside
+  `QML_DISK_CACHE_PATH`); quickshell's own strings name no other. With
+  `XDG_CACHE_HOME` unset it would be `~/.cache/quickshell/qmlcache`
+  (QStandardPaths' rule, read, not run: the rig never unsets it). **[2026-11-24, lane-fix-c5d: measured since, on root a: recheck-c5ds-measure ran the rig with `XDG_CACHE_HOME` unset too (its variant-unset-xdg-cache.diff, now the rig's `RIG_QMLCACHE=home`), and the shell put its 23 units in `$HOME/.cache/quickshell/qmlcache` of the decoy HOME (private-bus.sh sets that variable to another decoy, so finding them there shows it was unset); of its 8 races there (U641, U643, U646, U649, one worker and four) 2 were poisoned past two restarts, and removing that folder and restarting recovered both, all C2 and ready. lane-fix-c5d's R1 ran the knob once more: 23 units in the same folder]**
+- Recovery: both measured, each twice on root b. Removing that folder
+  makes the next start compile everything again; a later update that
+  rewrites the poisoned file changes its checksum, so the next start
+  recompiles it.
+
+### Q7: root a, today's host
+
+**Read.** No Qt source file is on this machine; the private headers are
+(`/usr/include/qt6/QtQml/6.12.0/QtQml/private/`). They give the
+content-hash mode and the save-time checksum above, the disk cache's read
+and write switches (`QmlcRead`, `QmlcWrite` in qv4engine_p.h 134-146),
+and a blob's source as a file or inline text (qqmldatablob_p.h 85-104).
+The load patch, as docs/OMARCHY-PLUGIN-CONTRACT.md read it in quickshell's
+sources and as its strings show in the binary ("Rewrote intercept",
+"Passing through intercept", `qs:@/`): every local QML file whose
+`import QtQuick` the scanner rewrites is switched to a `qs:` URL and served
+the scanner's text by the network factory; scripts and modules pass
+through as `file://`.
+
+**Measured.** In every root a arm the cache held no unit for
+`Service.qml`, `Guide.qml` or `BarWidget.qml` (23 files where root b had
+26), so a file served through the load patch is not disk-cached, and its
+text is the one the scanner read at the first load. The code-behinds
+(`.jsc`) and the model (`.mjsc`) are cached as on root b, `sourceTimeStamp`
+-1, each unit saved 0.2-5 ms after the engine's read. **[2026-11-24, lane-fix-c5d: in a quiet cold start; under a concurrent merge the poisoned units' read-to-save gap was about 9-10 ms (recheck-c5ds-measure's A641-c4 `Service-player.js`: last open +668.9, unlink +669.0, save +678.0 to +678.4 ms after the trigger; S1-633's `Service-player.js` as it read this lane's record: open +672.4, unlink +677.7, save +682.0); unpoisoned races reached 6-8 ms]** So on root a the
+race that matters is a write between a code-behind's read and its save.
+
+**The sweep.** The scanner reads `Service.qml` at the first load and the
+engine reads the code-behinds about 0.66 s later (Q8), all four within
+about 20 ms, and the merge takes 24-43 ms from its start to its writes. A
+merge fired at a code-behind's own open, as the lane text suggested and
+the recheck's R9 did twice, therefore writes after every code-behind has
+been read and saved (R9 recovered at the restart both times), so the
+sweep fired the merge at the scanner's read of `Service.qml` and swept the
+delay across the code-behinds' reads, at one worker and four, twelve delays each, 24 races
+in all (the bound the lead set, reached with a poisoned cache already
+found at its fifth delay):
+
+A mix is written as the files that ran C1's text, the rest running C2's;
+"pip", "player", "rewind" and "sources" are the four code-behinds.
+
+| delay after the scanner's read | workers | at the race | after two restarts | poisoned after both | after the cache folder was removed |
+|---|---|---|---|---|---|
+| 615 ms | 1 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 615 ms | 4 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 620 ms | 1 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 620 ms | 4 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 625 ms | 1 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 625 ms | 4 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 630 ms | 1 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 630 ms | 4 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 633 ms | 1 | C1 Service.qml, pip, player, the rest C2 | C1 player, the rest C2 | Service-player.js | all C2 |
+| 633 ms | 4 | C1 Service.qml, pip, player, the rest C2 | C1 player, the rest C2 | Service-player.js | all C2 |
+| 636 ms | 1 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 636 ms | 4 | C1 Service.qml, the rest C2 | all C2 | none | all C2 |
+| 639 ms | 1 | C1 Service.qml, pip, player, the rest C2 | C1 player, the rest C2 | Service-player.js | all C2 |
+| 639 ms | 4 | no service (Service-sources.js unavailable) | all C2 | none | all C2 |
+| 642 ms | 1 | C1 Service.qml, pip, player, the rest C2 | all C2 | none | all C2 |
+| 642 ms | 4 | no service (Service-sources.js unavailable) | all C2 | none | all C2 |
+| 645 ms | 1 | C1 Service.qml, pip, player, the rest C2 | C1 player, the rest C2 | Service-player.js | all C2 |
+| 645 ms | 4 | all C1 | all C2 | none | all C2 |
+| 650 ms | 1 | all C1 | C1 sources, the rest C2 | Service-sources.js | all C2 |
+| 650 ms | 4 | no service (Service-pip.js unavailable) | all C2 | none | all C2 |
+| 655 ms | 1 | all C1 | all C2 | none | all C2 |
+| 655 ms | 4 | all C1 | all C2 | none | all C2 |
+| 665 ms | 1 | all C1 | all C2 | none | all C2 |
+| 665 ms | 4 | all C1 | all C2 | none | all C2 |
+
+- **5 of 24 survived both restarts**, all five recovered when the cache
+  folder was removed: `Service-player.js` poisoned four times (633 ms at
+  one worker and four, 639 and 645 at one), `Service-sources.js` once
+  (650). With C1's `Service-player.js` under C2's `Service.qml` the
+  service's `status` throws "TypeError: Property 'socketAttachedLive' of
+  object [object Object] is not a function" at every start; with C1's
+  `Service-sources.js` beside C2's other files the service runs, ready, and
+  only its mark says it is mixed, so nothing the plugin shows says so.
+- **3 loaded no service at the race** (four workers: 639, 642, 650): the
+  engine read a code-behind while git had it unlinked ("Script
+  file://.../Service-sources.js unavailable", `Service-pip.js` once), h0's
+  shape for that file. The restart recovered each.
+- **The other 16 ran a mix or the old build at the race** (C1's
+  `Service.qml`, the scanner's text, with C2's code-behinds in ten, with
+  C1's `Service-pip.js` and `Service-player.js` and C2's other two in one;
+  all C1 in five), and the restart recovered each.
+
+**U, a later update for recovery** (one worker, `RIG_QMLCACHE=xdg`, so
+the cache sat where a user's does, and was there:
+`$XDG_CACHE_HOME/quickshell/qmlcache`, 23 files): 4 more races, 2 poisoned (`Service-rewind.js` at 639 ms,
+`Service-sources.js` at 645), each a silent mix after two restarts, and
+each recovered when C3 was published, updated under the running shell
+and the shell restarted: all C3, ready.
+
+| delay | at the race | after two restarts | poisoned after both | after the C3 update and a restart |
+|---|---|---|---|---|
+| 633 ms | C1 Service.qml, the rest C2 | all C2 | none | all C3 |
+| 639 ms | C1 Service.qml, pip, player, rewind, the rest C2 | C1 rewind, the rest C2 | Service-rewind.js | all C3 |
+| 645 ms | all C1 | C1 sources, the rest C2 | Service-sources.js | all C3 |
+| 650 ms | all C1 | all C2 | none | all C3 |
+
+On root a, then, 7 of 28 races poisoned a code-behind and survived two
+restarts; removing the cache folder recovered 5 of 5, a later update 2
+of 2.
+
+### Q8: the cold-start reads and four workers' order
+
+**The reads** (the open watch, every r, w and h arm; ms after the shell's
+first open of `Service.qml`):
+
+| root | arms | the first code-behind | the last | `Service.qml`'s unit saved |
+|---|---|---|---|---|
+| a | a-12-r, a-12-w-c4, a-12-w-g4, a-12-h1 | 658.7-696.8 | 668.8-707.1 | never (no unit) |
+| b | b-12-r, b-12-w-c4, b-12-h1 | 4.7-4.8 | 15.3-15.5 | 74.8 after its read (b-12-r) |
+
+The recheck's R6 read 664.4-680.5 ms on root a and 4.8-21.0 on root b. On root a
+the scanner's read of `Service.qml` is 8-9 ms after the shell's first
+open of the plugin folder, after `BarWidget.qml` and `Guide.qml`'s; on
+root b the engine reads `BarWidget.qml` and the model first, then
+`Guide.qml` about 110 ms later, then `Service.qml` about 540 ms after that.
+
+**Four workers' order** (15 runs: the three w arms here and the sweep's
+twelve four-worker races; with the recheck's three, 18):
+- In 15 of 15 the main process unlinked every changed file before any
+  worker created one, so `Service.qml` was absent for 5.1-8.2 ms: h0, for
+  every changed file at once. At one worker (14 runs) each file is
+  unlinked just before it is written, and `Service.qml` is absent under
+  0.1 ms (20 one-worker merges timed). **[2026-11-24, lane-fix-c5d: 24 one-worker merges, not 14 runs or 20: R1, R2's two, R3's two, R4, R5's two h1 arms, S1's 12 and U's 4, every h0 0.0-0.1 ms. And four workers' absence was 5.5-14.6 ms in recheck-c5ds-measure's 19 races (14.6 in its M1), 5.1-14.6 ms combined; a duration under about 2 ms is a difference of watch.py's read stamps]**
+- In 3 of 15 `Service.qml` closed, complete, before `Service-player.js` or
+  `Service-rewind.js` was created or closed, for 0.1-1.1 ms: h4's shape,
+  which none of the six earlier runs had. In the other 12 `Service.qml`
+  closed after every code-behind.
+- At one worker, 20 of 20 closed every code-behind before git unlinked
+  the old `Service.qml`: h1's moment, as lane-reload-d measured. **[2026-11-24, lane-fix-c5d: 24 of 24, the record's h1 lines for every one-worker merge; 20 is the count without U's four]**
+
+### The text corrected
+
+Bracketed, dated, never rewritten:
+- docs/STATUS.md: D-REL-16 (rewritten as P2 by its bracket), D-REL-14,
+  D-REL-9 and D-REL-6; D-DOC-37 and F-HARNESS-131 marked fixed.
+- docs/SERVICE-SPLIT.md: the write-order table's four-worker rows, "what
+  reads the window", the half-tree table's "the window it stands for"
+  column (h1, h4, a-01-h4, h0), "only a restart recovered", the C2 row's
+  "any pair" (only `Service.qml` with `Service-player.js` throws), the
+  `_QMLTYPE_` sentence (unverified: across a restart a new text kept its
+  number and a stale one got a new one; within a process no recompile was
+  reached), "Nothing else holds one" (no tool or reader keeps a list of its
+  own; ALLOWLIST and the pins are checked against the import lines), the
+  closure sentence (a closure the guard refuses), the rig's second
+  adaptation (in PluginRegistry.qml, not shell.qml), and "What a user must
+  do"; a new paragraph, "Real races", beside the half trees; the history
+  and what is not measured.
+- docs/QA-RESULTS.md, the call (d) section: the summary's two bullets, the
+  `_QMLTYPE_` line, Q4's four-worker bullet and "the window is git's 5-11
+  ms", the half trees' "each a shape the measured order passes through"
+  and "only a restart did", Q5's h4, "Not measured", and D-REL-16 under
+  Filed. The C5 section: "every release's notes already ask", "replaced",
+  the README's "development line" (a Troubleshooting bullet), and the
+  header's line (55, not 51).
+- RESULT-2026-11-24.txt's summary: "17 updates" (17 merges: 11 updates
+  and 6 half-tree completions), "created before ... closed", h4's window,
+  and "only the restart recovered".
+- docs/ARCHITECTURE.md: decision 8 (a restart is not always enough:
+  D-REL-16), section 4's `Service.qml` row (D-DOC-37) and section 9's
+  Array-method sentence (the guard knows the method by its name only).
+- README.md (L6): the Updating paragraph says the running shell keeps the
+  plugin it loaded, the service, the guide and the bar, until it is
+  restarted, and that a disable and an enable loads nothing new; a new
+  Troubleshooting bullet beside the development one says what to do when
+  IPTV misbehaves after an update even though the shell was restarted:
+  restart once more, and if that does not help remove
+  `~/.cache/quickshell/qmlcache` (under `$XDG_CACHE_HOME` when that is set)
+  and restart. It names no docs/ path; check-readme-notices reads 46
+  quotes, 31 joined, 0 problems.
+- Two comment-only commits in shipped files: Service-rewind.js (a7c95bf,
+  L5) and Service.qml's header, whose "each" read as each code-behind
+  (86cc65c). Each at its parent's byte count, with the comment-dropped file
+  and the inline view equal to the parent's (138 and 4,453 lines;
+  449,758 bytes either way), `split-service.py --verify --from-git HEAD`
+  green after each, and the header's first `{` still on line 55.
+- **"Every release's notes already ask."** CHANGELOG.md has 46 sections.
+  13 ask for the restart: 0.13.4 to 0.14.2 and 0.15.0 to 0.20.0. 0.14.3's
+  do not, 0.13.3's say "You do not need to restart", 0.7.4's and 0.7.5's
+  explain that an update's interface appears only after a restart, and no
+  section from 0.1.0 to 0.13.2 asks. Both rechecks were half right (one put
+  the first at 0.15.0 and counted "restart" as a word, the other counted
+  every section from 0.13.3). Written so in SERVICE-SPLIT.md and in the
+  C5 section.
+
+**The plan criteria (L4).** Each run on c5d as written, re-graded, and
+against a scratch copy carrying one deliberate mutant:
+
+| criterion | as written | re-graded, on c5d | its mutant |
+|---|---|---|---|
+| PLY-SVC-02 | 2 lines, both comments: "nothing" cannot pass | 0 code lines | `property var mpvProc: null` in Service.qml: 1 |
+| PLY-SOCK-02 | 2 lines (1 a comment), 0 under the written guard | 1 code line, `s.connected = true` in `attachPlayerSocket`, after `releasePlayerSocket()` and `createObject(root)` | a second arming line: 2 |
+| PLY-SVC-07 | 31 lines of every mention; the stub's 0 | the service's increments 6, the helper's 0 | `seq += 1` in a part: the helper's 1 |
+| PLY-SEC-17 | 2 lines (the stub) | 35 lines, 23 modules, none outside `sys.stdlib_module_names` **[2026-11-24, lane-fix-c5d: lines the grep matched: an AST walk finds 112 import statements over 40 modules, 77 inside functions; the criterion is now tests/test_helper_stdlib.py, F-GATE-30]** | `import requests` in a part: `['requests']` **[2026-11-24, lane-fix-c5d: at the top of a line; indented in a function, the grep printed `[]` and the AST reader `['requests']`]** |
+| SEC-07 | 197 lines (the stub's 9) | 330 lines (the parts' 133) | an enumeration; its M half is the check |
+
+### Searched and cleared (rule 15)
+
+- **Every statement that a restart recovers, or that h4 was not seen.**
+  docs/STATUS.md (D-REL-16, D-REL-14, D-REL-9, D-REL-6), SERVICE-SPLIT.md
+  (the update section, the history, what is not measured), QA-RESULTS.md
+  (the call (d) and C5 sections), RESULT-2026-11-24.txt and the rig's
+  header: each bracketed above. Service.qml's header and the README's
+  development bullet say only that the running shell keeps what it
+  loaded, which stands. CLAUDE.md, which this lane may not edit, carries
+  none of D-REL-16's wording; the join's proposed CLAUDE.md sentence ("can
+  run a mixed pair, or no service, until it restarts again") should not be
+  taken as written, for the lead.
+- **Other caches the same mechanism reaches.** Every file Qt caches is
+  saved in the same mode: on root b the guide, the bar and the model as
+  well as the service; on root a the code-behinds and the model. The
+  model's units (`Model.mjs` and `model/*.mjs`) were saved 0.2-2 ms after
+  their reads, 650 ms before the code-behinds', so a merge fired from
+  inside the plugin folder cannot reach them, and no race here poisoned
+  one. A release that changes a model part is exposed the same way on
+  either root, and has been since D-REL-5 split the model (0.13.6): not
+  raced, read from the mechanism. **[2026-11-24, lane-fix-c5d: raced since by recheck-c5ds-measure, and reached: fired at the starting shell's first open of `manifest.json` (its M1 to M5 on root a), at four workers 2 of 5 races unlinked `model/build.mjs` before the engine loaded the model, and nothing of the plugin loaded until a restart, which recovered it (no bar, no guide, no service; no unit saved, nothing poisoned); at one worker 5 of 5 ran h1's mix, and build.mjs's unit was saved 2.5-4 ms before git unlinked it, so a poisoned model unit was missed by that margin; on root b (its BM) `BarWidget.qml`'s unit was poisoned 2 of 2. And not "since D-REL-5": at v0.13.5 `Service.qml` imported `Model.js`, a script cached the same way; since at least the Qt 6.12 host update (2026-10-31), earlier not read. The section "D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)" below]** The helper is not Qt's to cache: its
+  stub checks every part's length and CRC-32 at each spawn
+  (`helper_damaged`). manifest.json is read by the registry's scan and by
+  the service's FileView, never compiled. Nothing else in the plugin
+  folder is loaded.
+- **Comments in the code-behinds that place a body.** Service-rewind.js
+  138-140 corrected; the others that name another file or point above or
+  below were read against where their targets live (applyProbe in
+  Service-player.js; playerSocketComponent, sourceProbeProc, `settings`,
+  playlistRerun and epgRerun on the root) and stand.
+- **The plan greps of a split file.** QA.md, QA-PLAYER.md and PLAN-M2.md
+  for a grep over `bin/omarchy-iptv` alone or `Service.qml` alone: the five
+  above, and none else that judges code (a grep for `bin/omarchy-iptv'`
+  and `Service.qml'` ending a command).
+- **F-HARNESS-131.** `flock` with and without `-o` measured on a scratch
+  lock: a surviving child held 1 descriptor and kept the lock taken
+  without `-o`, 0 and the lock free with it.
+
+### Checks run
+
+All on c5d at the commits above, the documents included, against the
+base's counts at 3200d22:
+- `node tests/Model.test.js`: 4,073 checks, 0 failures, and 4,073 with
+  `IPTV_HARNESS_OWN_ECHO=none` (base 4,073).
+- python by discovery: 3,033 (base 3,033). Run: test_service_files,
+  test_split_service, test_release, test_check_readme_notices,
+  test_defect_ledger, test_board_staleness and
+  test_marketplace_capabilities, 311 tests, OK. test_host_load_patch.py,
+  which starts qml itself, was not run (the lead's gate runs it): the
+  header it reads still ends at line 55.
+- The QML spec under gdb with decoy folders: 112 passed, 0 failed (base
+  112).
+- `scripts/qa-lib-test.sh`: 837 passed, 0 failed (base 837).
+- `scripts/split-service.py --check`: 5 files, 4 code-behinds, 47 root
+  functions, 158 forwarders, 2,268 sites, 34 of 34 cases (the base's);
+  `--verify --from-git HEAD`: the inline view HEAD's, 449,758 bytes.
+- `scripts/check.sh --qmllint-view Service.qml`: 0 errors, 46 warnings +
+  387 on Model members (the base's).
+- `scripts/release.py check`: 47 files.
+- `scripts/check-readme-notices.py`: 46 quotes, 31 joined, 0 problems.
+- `scripts/check-defect-ledger.py`: 805 rows, 805 ids, 0 problems;
+  `scripts/check-board-staleness.py`: 805 rows, 0 disagreements;
+  `scripts/check-sr-register.py`: 0 problems;
+  `scripts/check-double-encoding.py`: 0 problems.
+- The byte scans: ascii 569 files, control 541, both ok;
+  `scripts/check-marketplace-capabilities.py`: 221 files, 0 hits.
+- The rig: `bash -n run.sh` clean; its five python files parse; every run
+  above went through it.
+- The private-id scan of the range since e2ae4f4: 0.
+- The crash journal: 89 at the start, after every Qt run, and at the end.
+
+### Filed
+
+No new id. D-REL-16 is the finding, rewritten from the measurement and
+made P2 by the lead's L2. D-DOC-37 and F-HARNESS-131 are marked fixed.
+The open watch's blindness to who opened a file is the rig's, stated in
+watch.py, in the RESULT file's header and here, not a defect.
+
+## D-REL-14: call (d), the rechecks of the settle (lane-fix-c5d, 2026-11-24)
+
+Two read-only rechecks read c5d at c2dabf9 after the settle above, and
+each BLOCKED on two text findings, with nits beside them:
+recheck-c5ds-records (the records lens) and recheck-c5ds-measure (the
+measurement lens, which ran 36 races of its own on root a and 6 on root b
+with the committed rig). Their evidence is in the session scratch folder
+(recheck-c5ds-measure/runs/*.log and evidence/, recheck-c5ds-records/);
+every number below is taken from there or from the race record, and named.
+Nothing here reopens the lead's calls: D-REL-16 stays P2, L1 stands, and L3
+(a build stamp in every shipped QML and JS file, folded into D-HOST-1's
+running/onDisk reading) is still the next step. No shipped file changed.
+
+### The findings, and what was done
+
+- **Root a's restarts (records, must-fix).** "on root a the restart
+  recovered every race measured" (the settle's bracket on lane-reload-d's
+  bullet) is false: 7 of the settle's 28 root-a races left a poisoned
+  code-behind running after two restarts (S1-633 at one worker and four,
+  S1-639 and S1-645 at one worker, `Service-player.js`; S1-650,
+  `Service-sources.js`; U-639, `Service-rewind.js`; U-645,
+  `Service-sources.js`), and the measure recheck added 3 of 22 (A641-c4
+  and U649-c4, `Service-player.js`; U641, `Service-sources.js`). Bracketed
+  there, and the same gap by omission at the Filed bullet, at the
+  half-tree bullet ("A real race on root b ... restarts did not recover
+  it"), at L3's paragraph ("On root b a mix survives restarts") and in
+  SERVICE-SPLIT.md's bracket on "only a restart recovered": on either root,
+  `Service.qml`'s unit on root b and a code-behind's on root a.
+- **PLY-SEC-17 and constraint 3 (records, must-fix).** The re-graded
+  criterion grepped lines that start with `import` or `from`; an AST walk
+  of the stub and its 12 parts finds 112 import statements, 35 at module
+  level and 77 inside functions, over 40 modules, 17 of them imported only
+  inside functions (base64, calendar, ctypes, hashlib, hmac, http,
+  importlib, ipaddress, resource, secrets, socket, struct, subprocess,
+  threading, traceback, unicodedata, xml), and a nested `import requests`
+  in a copy left the grep at `[]`. And CLAUDE.md's constraint 3 had no gate
+  check at all: nothing in tests/ or scripts/ names `stdlib_module_names`,
+  and "stdlib only" and "third-party" appear only in comments and in the
+  a11y harness's own rule for its dbusmin.py (searched by the lead and
+  again here). Filed F-GATE-30 (P3, gate), fixed on c5d by
+  `tests/test_helper_stdlib.py`, below. PLY-SEC-17 re-graded to it, with
+  the AST one-liner as its human form; "the stub holds 2 of the helper's
+  35 import lines" corrected (the stub holds 8 import statements, 2 at
+  module level and 6 inside functions), and the D-DOC-37 row, the C5
+  join's "2 and 33" and the L4 table bracketed to say those are the lines
+  the old grep matched.
+- **The model is reachable (measure, must-fix).** Fired at the starting
+  shell's first open of `manifest.json` (`RIG_RACE_FILE=manifest.json
+  RIG_RACE_DELAY_MS=0`, runs M1 to M5, root a, 10 races): at four workers
+  2 of 5 (M1, M2) unlinked `model/build.mjs` (git's main process at +29.8
+  and +26.8 ms, the file created again at +42.5 and +39.3) before the
+  engine loaded the model, and M1-c4's log reads "file://<plugin>/Model.mjs:
+  Script file://<plugin>/model/build.mjs unavailable", then "service
+  plugin load failed for io.github.rmcdavid.iptv:
+  qs://<plugin>/Service.qml:14:1: Script file://<plugin>/Model.mjs
+  unavailable", "Plugin widget io.github.rmcdavid.iptv failed:
+  qs://<plugin>/BarWidget.qml:5:1: Script file://<plugin>/Model.mjs
+  unavailable" and "qs://<plugin>/Guide.qml[7:1]: Script
+  file://<plugin>/Model.mjs unavailable". Its marks at race-start and
+  race-open read service none, guide none, bar none; the restart gave all
+  C2 and ready; no unit was saved for build.mjs (22 files), so nothing was
+  poisoned. At one worker 5 of 5, and at four the other 3, h1's mix ran
+  (C1's `Service.qml` with C2's code-behinds, `status` throwing) and the
+  restart recovered it; build.mjs's unit was saved before git unlinked it
+  (M1: saved +31.0, unlinked +33.5), stale, not poisoned, by 2.5-4 ms. On
+  root b (BM, 2 races) `BarWidget.qml`'s unit was poisoned 2 of 2 (read
+  +2.1 and +1.7, git's close +27.8 and +44.0, saved +127.0 and +129.0;
+  checksum ed680d80.. = C2, code C1), C1's bar beside C2's service and
+  guide after two restarts. Every release rewrites `model/build.mjs`
+  (`PLUGIN_VERSION`), so the no-plugin outcome is 0.20.0's too. Bracketed
+  in SERVICE-SPLIT.md ("not raced"), here ("cannot reach them") and on
+  D-REL-16's row, which gains the root b bar poisoning; SERVICE-SPLIT's
+  "What a user must do" gains the no-bar, no-guide, no-service outcome
+  (a restart recovers it), and the README's Troubleshooting bullet now
+  names IPTV missing from the bar after an update (its Updating paragraph
+  already asks for the restart that recovers it).
+- **The poisoning window (measure, must-fix).** "0.2-5 ms between its read
+  and its save" is a quiet cold start's (a-12-r). Under a concurrent merge
+  the poisoned units' gap was about 9-10 ms: A641-c4's `Service-player.js`
+  (its evidence/A641-c4 open.log and watch.log, relative to its race open:
+  opens at +653.5 and +668.9, git's DELETE +669.0, CREATE +675.3,
+  CLOSE_WRITE +676.6, opens +676.0 (git's, after its CREATE), +677.9 and
+  +678.8; cache.txt saved +678,
+  POISONED, checksum e9ac1839.. = C2, code C1), and the settle's S1-633
+  `Service-player.js` as the recheck read it (open +672.4, unlink +677.7,
+  save +682.0). Four workers' absence of `Service.qml`: 5.5-14.6 ms in the
+  recheck's 19 four-worker races (its runs/*.log h0 lines; 14.6 in M1, 10.3
+  on root b in BM), 5.1-14.6 ms with the settle's 15. Bracketed in
+  SERVICE-SPLIT.md (603, 616 and the four-worker rows), STATUS.md (D-REL-9,
+  D-REL-16), here (Q7, Q8, lane-reload-d's write-order bullet) and in the
+  race record.
+- **Nits, all fixed.** "In five arms" is four (a-12-r, a-12-w-c4,
+  a-12-w-g4, a-12-h1). "20 of 20" one-worker merges is 24 of 24 (R1, R2's
+  two, R3's two, R4, R5's two h1 arms, S1's 12 and U's 4; every h1 yes and
+  every h0 0.0-0.1 ms, counted from the record's lines), and Q8's "(14
+  runs)" with it. "Since D-REL-5 split the model (0.13.6)": at v0.13.5
+  `Service.qml` read `import "Model.js" as Model`, a script cached the same
+  way, so the exposure holds since at least the Qt 6.12 host update
+  (2026-10-31), earlier not read. PLY-SVC-07's helper grep hardened, the
+  lead's call, one step past the recheck's form (below). The rig: an x
+  arm's two restarts now end the arm when no shell comes up (`restart 60
+  || return 1`), so `RIG_RECOVER=update` cannot call `quickshell ipc --pid
+  ""`; leftovers() reads `/proc/N/cmdline` inside braces, so a process
+  that exits mid-scan no longer prints "No such file or directory" into
+  the record; watch.py's docstring and the record's header say the times
+  mix Python read stamps with tmpfs mtimes (each CLOSE_WRITE stamp
+  0.55-2.2 ms after its file's mtime in the recheck's A644), so order holds
+  and sub-2 ms cross-clock comparisons do not. `bash -n run.sh` clean.
+- **The README's cache folder (measure, nit).** Measured on root a with
+  `XDG_CACHE_HOME` unset: the recheck's one-line variant
+  (variant-unset-xdg-cache.diff) put the shell's 23 units in
+  `$HOME/.cache/quickshell/qmlcache`; of 8 races (U641, U643, U646, U649,
+  one worker and four) 2 were poisoned past two restarts (U641's
+  `Service-sources.js`, a silent mix; U649-c4's `Service-player.js`, the
+  TypeError at every start), and removing that folder and restarting
+  recovered both. The variant is now the rig's knob `RIG_QMLCACHE=home`
+  (start the shell with neither `QML_DISK_CACHE_PATH` nor
+  `XDG_CACHE_HOME`). `omarchy-launch-shell` line 21 starts `quickshell -n
+  -p "$OMARCHY_PATH/shell"` with no cache setting, nothing under
+  /usr/share/omarchy names QML_DISK_CACHE_PATH, QML_DISABLE_DISK_CACHE or
+  qmlcache, and `strings -a /usr/bin/quickshell` holds none of them (read
+  again here; the recheck read the UTF-16 strings too). Not run: the
+  README removes the folder while the shell runs, the rig with it stopped.
+  D-REL-16's recovery count by cache removal is 10 of 10 (the settle's 7,
+  these 2, and the recheck's I2 on root b).
+- **L3 (proposal taken, the lead's call under the owner's standing
+  authority of 2026-11-09).** Two sentences on D-REL-16's row and in
+  SERVICE-SPLIT's "What a user must do": the stamp's notice names the
+  cache removal when it reads stale at start-up, since a stale reading
+  right after a fresh start can only mean a race or a poisoned cache and a
+  restart cannot clear a poisoned unit; and the stamp cannot speak in the
+  four-worker model outcome, so only the README reaches that user. The
+  first release that ships a code-behind carries a release-notes line
+  naming the cache removal: an item for that cut on D-REL-16 (CHANGELOG.md
+  not edited).
+
+### F-GATE-30: the test, red and green
+
+`tests/test_helper_stdlib.py` reads the helper's files from the stub's own
+list (`scripts/helper_files.py`'s `helper_paths`, as every reader of the
+helper's files does), walks each file's syntax tree at any depth and
+refuses, by file, line and module: an `import` or level-0 `from` whose
+top-level module is not in `sys.stdlib_module_names`; a relative import;
+and a call of `__import__`, `importlib.import_module` or
+`importlib.__import__` whose names it cannot show are standard. The lane
+text said the helper has no dynamic import; it has one, read here:
+`limit_memory` (03-io-playlist.py 1133-1137) imports each name of its
+`preload` parameter, FETCH_PRELOAD by default and EPG_PRELOAD from the epg
+verb (04-epg.py 1585). So the argument is JUDGED, not refused blind: a
+string literal, or the target of a `for` over a module-level tuple of
+string literals (assigned once, built from literals, other such tuples and
+`+`) or over a parameter never reassigned in its function whose default
+and every value a call in the helper passes resolve the same way. On c5d
+it reads 13 files, 112 statements, 40 modules, and the preload's 12
+modules (base64, binascii, calendar, encodings, hashlib, http, ipaddress,
+ssl, traceback, unicodedata, urllib, xml), all standard.
+
+22 tests: the tree (no finding; the stub and every listed part read, the
+stub's own imports counted), the preload judged name by name and a
+`"requests"` added to a copy's EPG_PRELOAD refused, and mutants handed to
+the reader: a nested third-party import (with its line), a top-level one,
+a `from` inside a method, `from . import x`, `__import__('requests')`,
+`importlib.import_module('yaml.x')`, `__import__(n)`, a preload loop over
+standard tuples (passes), a caller handing it a third-party name, a
+`+`-built tuple naming one, a default naming one, a computed value, a
+reassigned parameter, a tuple assigned twice, standard packages and
+submodules (pass), a docstring and a comment that read like imports
+(pass: 01-core.py:1718's "from its span's start", which a
+`^\s*(import|from)` grep reads as the module `its`), a nested import added
+to a copy of the real helper (found at its part and line), and the old
+line grep shown blind to a nested import the reader finds.
+
+Rule 11, both counts, on a scratch copy of the tree (every tracked file
+and the new module, committed in a throwaway repository):
+- green, the tree as it is: 22 run, 0 failures;
+- red, a function-level `import requests` appended to `bin/helper/10-state.py`
+  and the stub resealed with `scripts/split-helper.py --seal` (its
+  `--check` ok, so the list still reads): 22 run, 3 failures
+  (test_every_import_in_every_helper_file_is_the_standard_librarys,
+  test_a_nested_import_added_to_a_copy_of_the_real_helper_is_found,
+  test_a_third_party_name_added_to_the_epg_preload_is_refused); the old
+  PLY-SEC-17 grep on the same copy printed `[]`;
+- one-decision mutants of the reader: the main walk over `tree.body`
+  only, 15 failures; relative imports not refused, 1 error; the preload's
+  callers ignored, 5 failures.
+- On this tree: `python3 -m unittest tests.test_helper_stdlib`, 22 tests,
+  OK. The python count by discovery: 3,033 before, 3,055 after (+22);
+  check.sh's floor raised 3033 -> 3055.
+
+### PLY-SVC-07's helper grep, re-measured
+
+On c5d, and with one line at a time added to a copy of the helper
+(`seq += 1`, `play_seq += 1`, `x = record_seq(a) + 1`, `seq_no += 1`,
+`seq = seq + 1`, `n = record_seq(name) + 1`), counting matching lines:
+
+| grep | tree | the six mutants |
+|---|---|---|
+| D-DOC-37's `\bseq\b *(\+=\|\+\+)\|seq *\+ *1` | 0 | 1, 0, 0, 0, 1 (sixth not run) |
+| the recheck's `\w*seq\b *(\+=\|\+\+)\|seq\b[^=\n]*\+ *1` | 0 | 1, 1, 1, 0, 1, 0 |
+| taken: `\w*seq\w* *(\+=\|\+\+)\|seq\w*\b[^=]*\+ *1` | 0 | 1, 1, 1, 1, 1, 1 |
+
+The recheck's `[^=\n]` is, in an ERE bracket, a backslash and the letter
+n, so `record_seq(name) + 1` escaped it. The taken form is in PLY-SVC-07's
+bracket.
+
+### Found while fixing, and fixed
+
+- **Four QA-PLAYER rows the settle's re-grades split.** PLY-SOCK-02,
+  PLY-SVC-02, PLY-SEC-17 and PLY-SVC-07 carried bare `|` inside their
+  grep commands, which a Markdown table reads as cell breaks: 5, 5, 9 and
+  7 cells where the table has 4, the Expected column displaced (each 4 at
+  3200d22). The pipes in those Steps cells are written `\|` now, which a
+  table renders as a plain bar, with a dated bracket saying so; every
+  PLY row then counts 4 cells but PLY-SEC-14 (5, older than this branch).
+
+### R1: the edited rig, run once
+
+Root a, `RIG_RACE_FILE=Service.qml`, `RIG_RECOVER=update`, one worker
+(arm a-12-x), and `RIG_QMLCACHE=home` so the new knob ran too; the rig's
+safety as committed (a nested headless cage on private-bus.sh, every
+quickshell under gdb, IPC by `--pid`, decoy HOME and XDG folders, no
+player), under the heavy lock with `flock -o`, nice 10 and a 1,500 s
+bound; rig at 4500eca, `RIG_DEV=3200d22 RIG_C0=main`, builds C0
+1321afff9f0d, C1 79594ed91f46, C2 34230d885b2d, C3 9d60275bdf91, 22:10 to
+22:11 local. Exit 0. The readout:
+- race-start and race-open: C1 `Service.qml` with C2's four code-behinds,
+  `status` threw "TypeError: Property 'socketAttached' of object [object
+  Object] is not a function", the guide's footer "Updated \xb7 restart the
+  shell to see the new version": h1's mix, as the merge (+1.0 to +66.0 ms
+  after the scanner's read) finished before the engine's code-behind
+  reads;
+- both restarts: all C2, ready, 3 channels, build running 0.99.1 onDisk
+  0.99.1;
+- the C3 update under the running shell (update rc 0): still C2 running,
+  installed 0.99.2; the restart after it: all C3, ready;
+- the cache: "23 file(s) under .../home/.cache, in
+  .../home/.cache/quickshell/qmlcache" at every read, so `XDG_CACHE_HOME`
+  was unset as asked; the code-behinds' units C2 (agrees) through both
+  restarts and C3 after the update; build.mjs stale at the race (C1's
+  checksum, recompiled at the next load); nothing poisoned.
+- the crash journal: 89 before and 89 after (the rig's own lines and the
+  driver's).
+Its output is not committed: it adds no fact the record lacks.
+
+### Searched and cleared (rule 15)
+
+- **Restart-surviving poison tied to root b alone**: every line of
+  docs/*.md, README.md, the rig's two RESULT files and the shipped QML and
+  JS naming "root b" beside restart, poison, cache or survive (20 lines).
+  Fixed: QA-RESULTS 27318, 27562, 27622, L3's paragraph, SERVICE-SPLIT's
+  bracket on "only a restart recovered". Cleared: QA-RESULTS 27540 (the
+  read gaps), 27995 and 28054 (Q6 and Q7 headings and text, each about one
+  root), SERVICE-SPLIT 559, 603, 621, 635 (names both roots) and 728,
+  STATUS.md 556-558 (D-REL-14's text and D-REL-16 name root a's 7 of 28),
+  and the RESULT file's run headers.
+- **The window and the absence, wherever written**: "0.2-5 ms" (5 places),
+  "5.1-8.2" and "5.1-5.8" (7), "20 of 20" and "one-worker merges" (the
+  record's and Q8's; QA.md 1286, STATUS 556, 849, 895, 912 and the older
+  QA-RESULTS lines are other counts, cleared), "five arms" (1), "0.13.6"
+  beside the model (SERVICE-SPLIT 621, QA-RESULTS 28248, D-REL-16's row;
+  the 0.13.6 lines of ARCHITECTURE*, QA*, HELPER-SPLIT and the contract
+  are about that release's behaviour, cleared), "read, not run" beside the
+  cache folder (QA-RESULTS 28030, SERVICE-SPLIT 718; QA-RESULTS 27522 and
+  27615 are `/etc/gitconfig`, still unrun, cleared).
+- **Constraint 3's other graders**: QA*.md, PLAN*.md and ARCHITECTURE*.md
+  for a grep of `^import`, `^from` or `import `: PLY-SEC-17 alone.
+- **CLAUDE.md's other engineering constraints graded by a grep a
+  function-level form defeats**: none. Constraint 1 is held by three gate
+  scripts that parse the QML; constraint 8 by the byte scans over whole
+  files; constraint 4's sudo by the marketplace capability scan, a
+  whole-line pattern; constraints 5 to 7 by tests and scenarios, not
+  greps. Found, not fixed (another shape): constraint 2, argv only (no
+  `bash -c`, no `shell=True`), has no gate check either -- the capability
+  patterns hold `bash` and `sudo` but not `shell=True` or `-c` -- and is
+  graded only by the plan greps SEC-01, SRC-SEC-12, PLY-SEC-15 and G4,
+  whole-line greps a nesting cannot defeat; but QA-PLAYER section 9.3's
+  PLY-SEC-15 command (line 1122) includes `*.qml`, `*.js` and
+  `omarchy-iptv` only, so it reads neither the helper's parts (`*.py`,
+  D-REL-7) nor the model (`*.mjs`, D-REL-5): D-DOC-37's file-list shape.
+  It finds 0 on the tree with or without them, so it does not lie today.
+  Left for the lead (proposals). QA.md's SEC-07 row and QA-PLAYER's
+  PLY-SEC-14 split their tables the same way as the four rows above,
+  before this branch; left as found.
+
+### Checks run
+
+Before (a scratch clone at c2dabf9) and after (this tree, the commits
+below):
+- `tests/test_helper_stdlib.py` alone: absent before; 22 tests, OK after.
+- test_defect_ledger, test_board_staleness, test_check_readme_notices,
+  test_service_files, test_split_service, test_release,
+  test_check_sr_register, test_doc_host_mode, test_gate_file_scan,
+  test_marketplace_capabilities, test_qmllint_count, test_shipped_copy,
+  test_census_dates, test_check_double_encoding and test_split_helper,
+  under the heavy lock: 480 tests OK before; with test_helper_stdlib, 502
+  tests OK after.
+- `scripts/check-defect-ledger.py`: 805 rows and 805 ids before, 806 and
+  806 after (F-GATE-30); `scripts/check-board-staleness.py`: 805 rows
+  before, 806 after, 0 disagreements both; `scripts/check-readme-notices.py`:
+  46 quotes, 31 joined, 0 problems, before and after;
+  `scripts/check-sr-register.py`: 40 rows, 455 citations, 0 problems, both;
+  `scripts/check-double-encoding.py`: 632 files before, 633 after, 0
+  problems both; `scripts/release.py check`: 47 files, both;
+  `scripts/split-service.py --check`: 5 files, 4 code-behinds, 47 root
+  functions, 158 forwarders, 2,268 sites, 34 of 34 cases, both;
+  `scripts/split-helper.py --check`: 12 parts, both; the byte scans: ascii
+  569 files and control 541 before, 570 and 542 after, ok both.
+- node and the QML spec were not run: no file they read changed.
+- The crash journal: 89 at the start, after R1 and at the end.

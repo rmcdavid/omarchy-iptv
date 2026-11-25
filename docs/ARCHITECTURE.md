@@ -38,7 +38,7 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | 5 | EPG | QML parses XMLTV; helper emits full schedule; helper emits now/next | **Helper parses XMLTV (plain or gzip) into `epg-now.json` (now/next per tvg-id); a 5-minute timer re-runs the cheap `epg --now-only` recompute from the cached programme window; downloads honor a TTL** | The overlay never touches XML (US6, "never blocks on EPG"). The file stays small: measured at about 190 bytes a channel with titles alone and about 650 with a description, category and episode on now and next (D-EPG-11, 2026-10-22), so 1.9-6.4 MB at 10k channels; the shell indexes it by line and parses one entry when a row asks, never the document whole. |
 | 6 | Favorites/recents identity | tvg-id; URL; name; hash of both | **`t:<tvg-id>` when that tvg-id is unique in the playlist, else `u:<fnv1a32(url)>`, `#n` suffix for exact duplicates** | tvg-id survives URL/token rotation (Xtream providers), but HD/SD variants often share one tvg-id, so uniqueness is checked per playlist and the URL hash is the fallback. Ids are assigned by the helper (it sees the whole list); `Model.channelId` mirrors the per-row rule. FNV-1a is trivial in both languages and pinned by shared test vectors. **[2026-11-03: this row states id scheme 1, and the code has cited it for scheme 2 since 482a21e (2026-09-16, D-ID-1), which this row never said: a row that would take `u:` takes `n:<fnv1a32(normalize_id_text(name))>` instead when its name keys one and that key is unique in the playlist, so a password change inside the URL no longer moves its id. D-ID-2 is the accepted limit of that, and D-ID-5 the shell's remap moving references across a gap between the two mirrors' folds, fixed on `dev` the same day: the remap reads the `id` the helper wrote on each row instead of refolding the name, and both folds' whitespace is enumerated (their lower-casing still differs, D-SRC-12, but the shell no longer derives an id from it). `Model.channelId` returns that `id` when the row carries one.]** |
 | 7 | Settings propagation | widget pushes `settings` into the service; service reads `shell.barConfig`; helper reads shell.json | **Service derives its settings from `shell.barConfig` (`Model.findBarEntry`)** | The host refreshes every scoped api's `barConfig` on each shell.json change (`syncPluginApis`, lines 875-881, triggered by `onShellConfigChanged`, lines 67-71), so `omarchy bar set` propagates without a widget instance and regardless of which bar hosts us. Bindings on `playlistUrl`/`epgUrl` re-run the helper (debounced); `refreshMinutes` re-arms the timer; `mpvArgs` applies on next launch. The widget reads only its view-side keys (`showChannelName`) from injected `settings`. |
-| 8 | `keepLoaded` | on / off | **on (manifest-wide flag)** | Overlay: window mounted between summons -> open under 150 ms (clipboard/emojis do this). Service: survives `rescanPlugins`, so installing another plugin does not kill playback. **[2026-11-06, D-PLY-64: it does not survive the host reading the plugin as disabled, even for a moment. Omarchy 4.5.0's migrations replaced `shell.json` while they ran, and the host destroyed the Service and created a new one in the same shell. The player's owner claim now names the Service object as well as the shell, so the new one keeps the channel (ARCHITECTURE-PLAYER 4.14).]** Cost: `Service.qml` edits need `omarchy restart shell` (README says so). |
+| 8 | `keepLoaded` | on / off | **on (manifest-wide flag)** | Overlay: window mounted between summons -> open under 150 ms (clipboard/emojis do this). Service: survives `rescanPlugins`, so installing another plugin does not kill playback. **[2026-11-06, D-PLY-64: it does not survive the host reading the plugin as disabled, even for a moment. Omarchy 4.5.0's migrations replaced `shell.json` while they ran, and the host destroyed the Service and created a new one in the same shell. The player's owner claim now names the Service object as well as the shell, so the new one keeps the channel (ARCHITECTURE-PLAYER 4.14).]** Cost: `Service.qml` edits need `omarchy restart shell` (README says so). **[2026-11-24, D-REL-14: and so do edits to its code-behinds, `Service-<domain>.js`, which hold most of the service's function bodies since 2026-11-24 (docs/SERVICE-SPLIT.md); the README says so too.]** **[2026-11-24, D-REL-14's call (d), measured in a nested cage on the host's own reload code: the restart is not keepLoaded's cost alone. The engine keeps each component it first compiled, so after an update the host's reload, a rescan and a disable and an enable all ran the old build of the service, the guide, the bar and the model alike; edits to any of them need the restart (docs/SERVICE-SPLIT.md, "Updates and hot reloads across a version change").]** **[2026-11-24, lane-settle-c5d: and a restart is not always enough. A cold start that raced an update can leave Qt's disk cache holding one build's code under the other's checksum, run again at every start until `$XDG_CACHE_HOME/quickshell/qmlcache` is removed or a later update rewrites the file (D-REL-16, P2; docs/SERVICE-SPLIT.md, "Real races").]** |
 | 9 | Guide keyboard model | j/k as commands; modal; Ctrl-chords | **Letters always filter; arrows or Ctrl+J/K move; Ctrl+F favorite; Ctrl+R refresh; Tab cycles groups; Esc peels filter -> group -> close** | PRODUCT.md asks for both "type to search" and j/k. Search-as-you-type is the first-party overlay convention (clipboard/emojis); plain `f`/`r`/`j`/`k` would eat the first letter of "france 24". Final say is the UX designer's (see Open risks). |
 | 10 | Helper error shape | bare string; structured object | **`{"ok": false, "kind": "...", "error": {"code": "...", "message": "..."}}` everywhere** | The guide shows `error.message` verbatim (US1) and can switch on `code`. `Model.parseHelperStatus` upgrades a bare string to the object form, so the stub contract in the task brief still parses. |
 | 11 | `#EXTGRP` scope | next entry only; until next `#EXTGRP` | **Persists until the next `#EXTGRP`; `group-title` wins** | Matches VLC's m3u demuxer, which most playlist generators target. |
@@ -126,7 +126,8 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | Path | Purpose |
 |---|---|
 | `manifest.json` | Plugin manifest: id, three kinds, `keepLoaded`, settings schema/defaults. Validated by `omarchy plugin validate`. |
-| `Service.qml` | Headless state owner: settings, caches, state file, helper runs, the mpv `Process`, IPC target. |
+| `Service.qml` | Headless state owner: settings, caches, state file, helper runs, the mpv `Process`, IPC target. **[2026-11-24, D-DOC-37: it holds no mpv `Process` and has not since M2-02 made the player detached. The helper's `player start` spawns mpv, the service reaches it through the helper and the player's IPC socket, and its only mpv command is `which mpv`.]** |
+| `Service-<domain>.js` | The service's code-behinds (D-REL-14): `Service-pip.js`, `Service-player.js`, `Service-rewind.js`, `Service-sources.js`. Classic JavaScript, imported by `Service.qml` and run in its own scope; each holds the bodies of the functions moved out of `Service.qml`, which keeps a one-line forwarder at each one's old place and every property, signal and object. docs/SERVICE-SPLIT.md. |
 | `BarWidget.qml` | Bar entry (per monitor): TV glyph + now-playing label on `WidgetButton`; click/scroll/middle actions call the service. |
 | `Guide.qml` | Fullscreen overlay: search, groups, favorites, EPG lines; `open/close/toggle`; dismisses via `shell.hide`. |
 | `Model.mjs` | The model's public surface: re-exports every public name from the part that declares it. Header comment and generated export lines only. |
@@ -5194,6 +5195,53 @@ order, so a function in any part sees every name, and a test that replaces
   that part's entry. The other ten parts and the tail are the cut's byte for
   byte.
 
+**The service's code-behinds (D-REL-14).** `Service.qml` keeps every
+property, signal, change handler and object, the state machine, and the
+functions the mutation patches edit; since 2026-11-23 and 2026-11-24 the
+bodies of most of its functions live in classic-JavaScript code-behinds,
+`Service-<domain>.js` (pip, player, rewind, sources), each imported as
+`import "Service-<domain>.js" as Service<Domain>` and reached through a
+one-line forwarder at the function's old place. docs/SERVICE-SPLIT.md has
+the why, the layout, how a code-behind runs and every refusal. The rules:
+- A code-behind holds functions at the root's two-space indent, each with
+  the `//` lines directly above it, and nothing else but blank lines and
+  loose `//` comments: no `.pragma library`, no `.import`, no top-level
+  statement. It runs in `Service.qml`'s own scope, under its imports.
+- The forwarder is exactly `  function F(a, b) { return ServicePip.F(a, b) }`:
+  the header's own plain argument names, repeated in the call. Edit a moved
+  function in its code-behind, never its forwarder; a change of arguments
+  changes both.
+- Inside a code-behind, a function of the same code-behind is called as
+  `root.F(...)`, never bare; no `this` and no `arguments`. Anywhere in the
+  service a qualifier is named only in its forwarders and its import, and
+  every `root.N` names a member of the root.
+- A code-behind makes no function that may outlive its call (D-REL-15): one
+  made there and called after its Service is deleted can take the QML
+  engine down (a SIGSEGV, measured), and whether it does turns on what the
+  function that made it looked up first. The immediate callback of a
+  synchronous Array method is allowed, and so is one a
+  `// CLOSURE-EXCEPTION: <reason>` comment excuses **[2026-11-24,
+  lane-settle-c5d: the guard knows an Array method only by its name
+  (`SYNC_ARRAY_METHODS` in `scripts/split-service.py`), not by its
+  receiver, so a callback handed to any object's method of one of those
+  names passes it too; docs/SERVICE-SPLIT.md says so]**; anything else is made
+  in a root function of `Service.qml`, as `persistActiveLater` is.
+- `scripts/split-service.py --check`, the gate's "service split guard",
+  holds all of the above. A function moves only by `--cut`, which verifies
+  the move byte for byte and judges the result before it writes, never by
+  hand; a new code-behind goes on `ALLOWLIST` in `scripts/release.py`,
+  which cross-checks the list against `Service.qml`'s imports both ways.
+- Anything in Python, node or shell that needs the service's FILES or its
+  TEXT asks the readers: `scripts/service_files.py`, `tests/service-files.js`
+  (`serviceSet` is the file set the node harness boots), `qa_service_files`
+  and `qa_service_text` in `scripts/qa-lib.sh`. Never a second list. A pin
+  on a function's text reads the INLINE view, each forwarder read as the
+  function it forwards to, which is the one-file text, so moving a function
+  moves no pin.
+- qmllint given a code-behind checks its syntax alone, so the gate also
+  lints the inline view and names each finding at its own file and line
+  (F-GATE-29).
+
 **What the cut dropped, recorded (D-REL-5 round 2, R4).** The one-file
 `Model.js` opened with the header below and closed with a CommonJS export
 guard that carried nine comment lines. Neither survives the cut: the
@@ -5280,7 +5328,7 @@ Git:
 | Layer | What is covered | Exact command |
 |---|---|---|
 | Manifest | schema, entry points exist, no symlinks, id not reserved | `omarchy plugin validate .` from the repo root |
-| QML static | syntax, imports, unqualified access, unknown properties | `mkdir -p /tmp/qmlroot/qs && ln -sfn /usr/share/omarchy/shell/Commons /tmp/qmlroot/qs/Commons && ln -sfn /usr/share/omarchy/shell/Ui /tmp/qmlroot/qs/Ui && /usr/lib/qt6/bin/qmllint -I /tmp/qmlroot -I /usr/lib/qt6/qml Service.qml BarWidget.qml Guide.qml tests/Model.spec.qml` |
+| QML static | syntax, imports, unqualified access, unknown properties | `mkdir -p /tmp/qmlroot/qs && ln -sfn /usr/share/omarchy/shell/Commons /tmp/qmlroot/qs/Commons && ln -sfn /usr/share/omarchy/shell/Ui /tmp/qmlroot/qs/Ui && /usr/lib/qt6/bin/qmllint -I /tmp/qmlroot -I /usr/lib/qt6/qml Service.qml BarWidget.qml Guide.qml tests/Model.spec.qml`; and the service's inline view, the scope its code-behinds' bodies run in (D-REL-14, F-GATE-29): `scripts/check.sh --qmllint-view Service.qml` |
 | Model (node) | normalization, ids, filtering/ranking, groups, state, settings lookup, mpv argv, formatting | `node tests/Model.test.js` |
 | Model (QML engine) | same functions loaded by Qt's JS engine | `QT_QPA_PLATFORM=offscreen /usr/lib/qt6/bin/qmltestrunner -input tests/Model.spec.qml` |
 | Helper | M3U parsing, attribute edge cases, EXTGRP/VLCOPT/KODIPROP, ids, scheme refusal, cache/status writing, stub exit codes; later XMLTV plain/gz with offsets and the mpv IPC client against a fake socket server | `python3 -m unittest discover -s tests` |

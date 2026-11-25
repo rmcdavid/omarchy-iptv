@@ -1,0 +1,1658 @@
+scripts/dev-harness/spikes/codebehind-reload/RESULT-2026-11-24.txt
+
+D-REL-14's call (d), lane-reload-d, 2026-11-24 (17:33 to 17:53 CST).
+
+THE RUNS. The rig as committed at 0dbc3d0 (run.sh, candidates.py,
+make-root.py, rig.qml.in, watch.py, analyze.py), five runs, each under the
+heavy lock with `flock -o` and nice 10:
+  RIG_DEV=3200d22a4fc15b00f9c59f7bc8a15213d9f98a37 RIG_C0=main run.sh ARM...
+  R1 a-01-r b-01-r a-12-r b-12-r          R4 a-12-h4 b-12-h4
+  R2 a-01-t b-01-t a-12-t b-12-t          R5 a-01-h4 a-01-h0
+  R3 a-12-w-c4 b-12-w-c4 a-12-w-g4 a-12-h1 b-12-h1
+Builds (candidates.py, the same every run): C0 1321aff (0.20.0, local main),
+C1 79594ed (3200d22's ALLOWLIST export by release.py's build_tree, 0.99.0,
+marks), C2 34230d8 (0.99.1, marks, Service-player.js's socketAttached
+renamed socketAttachedLive and Service.qml's forwarder calling the new
+name); 47 allowlisted files. Host: omarchy 4.5.0-3 (shell.qml sha256
+d6d99af1..., services/PluginRegistry.qml 3acf0f44..., both pinned by
+make-root.py), quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3, git
+2.56.0-1, cage 0.3.1-1. Crash journal 89 before and after every shell of
+every run; gdb reported no signal in any run.
+The readouts are the runs' stdout as printed, but for the middle dot of a
+guide footer, written \xb7 here (analyze.py prints it so since the commit
+after 0dbc3d0; the runs printed the character).
+
+SUMMARY (the verdicts; docs/QA-RESULTS.md "D-REL-14: call (d), a version
+change with code-behinds" holds the reading).
+- Update and keep using it (r and t arms' first four steps, 8 of 8, both
+  roots, C0 to C1 and C1 to C2): the host's watcher reloaded 150.6-154.5 ms
+  after git's last write and rescanPlugins reloaded again; the kept service
+  (the same object), the rebuilt guide and the re-registered bar all ran the
+  OLD build, each the same _QMLTYPE_ as before the update, every file's mark
+  the old one: no mix. Logged: nothing from the plugin's files. The plugin
+  read its new version on disk at the guide's open: build running 0.20.0 (or
+  0.99.0), onDisk 0.99.0 (or 0.99.1), stale true, footer "Updated \xb7
+  restart the shell to see the new version" (D-HOST-1).
+- Restart (r, 4 of 4): everything the new build, three channels, the
+  starred channel kept (state favorites ['t:one']), the bar entry's
+  refreshMinutes 120 kept.
+- Disable and enable, twice, without a restart (t, 4 of 4): each new service
+  instance was the old build's type and text, Service.qml and every
+  code-behind alike (C0's, or all five marks C1); no mix, no error, no
+  crash. Before the second enable the engine collected garbage and loaded
+  8000 components it had never seen: still the old type, and the control (a
+  component of the rig's own, let go, then its file rewritten) also came
+  back as its first type with its first text (v=one), so no path the rig
+  drove released a component once loaded. The host's disable drops the bar
+  entry (refreshMinutes 120 -> 360 after the enable; D-QA-17).
+- Write order (17 updates [lane-settle-c5d, 2026-11-24: 17 merges timed,
+  11 updates and 6 half-tree completions]): at git's default one worker every working-tree
+  close was in index order (Service-*.js, then Service.qml, then
+  manifest.json and model/), the writes spanning 5.3-5.8 ms of a 38-47 ms
+  merge with no gap above 1.4 ms [the join, 2026-11-24: this line read
+  5.3-6.1 ms; the fourteen one-worker runs below print 5.3 to 5.8]. At four workers, by `-c` (2 of 2) and by
+  the decoy HOME's ~/.gitconfig (1 of 1, the order no longer index order,
+  so the user's setting reached the update's git), the closes interleaved;
+  in the two `-c` runs Service.qml was created before Service-rewind.js (and
+  Service-player.js) closed [lane-settle-c5d, 2026-11-24: created, not
+  complete; in all three four-worker runs Service.qml CLOSED after every
+  code-behind, so no run here left a complete new Service.qml beside an
+  absent code-behind, h4's shape; RESULT-2026-11-24-race.txt reads the
+  unlinks too]. No host reload or load began before the last
+  write in any of the 17.
+- A shell starting cold inside that window (h arms, made by hand): h1 (the
+  new code-behinds beside the old Service.qml, one worker's window) ran a
+  MIX, "C1 Service.qml, C2" code-behinds, its status throwing "TypeError:
+  Property 'socketAttached' of object [object Object] is not a function";
+  h4 (the new Service.qml with Service-player.js not there, four workers'
+  window [lane-settle-c5d, 2026-11-24: not in these runs, but in 3 of
+  the settle's 15 four-worker runs, for 0.1-1.1 ms each; four workers'
+  longer window is h0, every changed file unlinked before any is
+  created, RESULT-2026-11-24-race.txt]) and the first release's h4 (C1's Service.qml with no code-behind
+  yet) loaded no service: "Script file://.../Service-player.js
+  unavailable" (Service-pip.js for the first release); h0 (Service.qml
+  unlinked, any worker count, 0.20.0's own window) loaded no service: "No
+  such file or directory". In every h arm, both roots where run, the
+  completed tree, the watcher's reload, rescanPlugins and a disable and an
+  enable all returned the same mixed or failed load; only the restart
+  recovered [lane-settle-c5d, 2026-11-24: on these hand-made trees. A real
+  race can leave Qt's disk cache holding the old code under the new file's
+  checksum, Service.qml's on root b and a code-behind's on root a, and that
+  mix survives restarts; RESULT-2026-11-24-race.txt].
+
+THE RUNS AS PRINTED.
+
+==================================== R1
+codebehind-reload: work /tmp/claude-1000/cbr.AnnP5N; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 3200d22a4fc15b00f9c59f7bc8a15213d9f98a37
+private-bus.sh: bus pid 349223 at unix:path=/tmp/claude-1000/cbr.AnnP5N/bus/dbus-0gBrfOBUpI,guid=22081f635bc05ad897d36efd6b061ecf
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 79594ed91f46  C2 34230d885b2d (allowlist 47 files)
+nested display wayland-0 (cage 349572)
+== a-01-r: root a (pragma), C0 -> C1, mode r
+  [start]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:33'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:33'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:33'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:33'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      6 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:33'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "a9f46914"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 26 working-tree events in 5.3 ms (merge 41.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.2 ms (the host's debounce is 150 ms)
+    localPluginChanged x26, -4.9 to +0.1 ms after the last write
+      +151.1 ms after the last write: pluginReloading true
+      +152.1 ms after the last write: panelLoader none
+      +152.1 ms after the last write: panelLoader none
+      +152.1 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a3260)
+      +161.1 ms after the last write: scanFinished installed=yes
+      +161.1 ms after the last write: pluginReloading false
+      +163.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a5c60)
+      +186.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb99dbc0)
+      +360.1 ms after the last write: pluginReloading true
+      +360.1 ms after the last write: panelLoader none
+      +360.1 ms after the last write: panelLoader none
+      +360.1 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a3260)
+      +376.1 ms after the last write: scanFinished installed=yes
+      +376.1 ms after the last write: pluginReloading false
+      +378.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb99da00)
+      +407.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcf9b1d00)
+    a reload or load before the last write: no
+== b-01-r: root b (no pragma), C0 -> C1, mode r
+  [start]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+  [watcher-reload]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      5 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "a1faf80e"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 26 working-tree events in 5.7 ms (merge 43.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.1 ms (the host's debounce is 150 ms)
+    localPluginChanged x26, -5.8 to +0.2 ms after the last write
+      +151.2 ms after the last write: pluginReloading true
+      +151.2 ms after the last write: panelLoader none
+      +152.2 ms after the last write: panelLoader none
+      +152.2 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a7f60)
+      +197.2 ms after the last write: scanFinished installed=yes
+      +197.2 ms after the last write: pluginReloading false
+      +207.2 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd080a140)
+      +289.2 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd080b560)
+      +563.2 ms after the last write: pluginReloading true
+      +566.2 ms after the last write: panelLoader none
+      +573.2 ms after the last write: panelLoader none
+      +574.2 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a7f60)
+      +655.2 ms after the last write: scanFinished installed=yes
+      +655.2 ms after the last write: pluginReloading false
+      +659.2 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a68a0)
+      +710.2 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a51e0)
+    a reload or load before the last write: no
+== a-12-r: root a (pragma), C1 -> C2, mode r
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      6 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "c8d002aa"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 30 working-tree events in 5.8 ms (merge 41.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.2 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -5.6 to +0.4 ms after the last write
+      +151.4 ms after the last write: pluginReloading true
+      +151.4 ms after the last write: panelLoader none
+      +151.4 ms after the last write: panelLoader none
+      +151.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8900)
+      +162.4 ms after the last write: scanFinished installed=yes
+      +162.4 ms after the last write: pluginReloading false
+      +164.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a6d00)
+      +189.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb785860)
+      +358.4 ms after the last write: pluginReloading true
+      +358.4 ms after the last write: panelLoader none
+      +358.4 ms after the last write: panelLoader none
+      +358.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8900)
+      +372.4 ms after the last write: scanFinished installed=yes
+      +372.4 ms after the last write: pluginReloading false
+      +375.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb964400)
+      +397.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd01521a0)
+    a reload or load before the last write: no
+== b-12-r: root b (no pragma), C1 -> C2, mode r
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      5 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:34'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "45098539"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 30 working-tree events in 5.5 ms (merge 42.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -5.0 to +0.0 ms after the last write
+      +152.0 ms after the last write: pluginReloading true
+      +152.0 ms after the last write: panelLoader none
+      +152.0 ms after the last write: panelLoader none
+      +152.0 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8740)
+      +163.0 ms after the last write: scanFinished installed=yes
+      +163.0 ms after the last write: pluginReloading false
+      +165.0 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a5f00)
+      +189.0 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a3960)
+      +356.0 ms after the last write: pluginReloading true
+      +356.0 ms after the last write: panelLoader none
+      +357.0 ms after the last write: panelLoader none
+      +357.0 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8740)
+      +369.0 ms after the last write: scanFinished installed=yes
+      +370.0 ms after the last write: pluginReloading false
+      +372.0 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a68a0)
+      +389.0 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2e2a180)
+    a reload or load before the last write: no
+crash journal after: 89
+rc=0
+
+==================================== R2
+codebehind-reload: work /tmp/claude-1000/cbr.y9hNNN; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 3200d22a4fc15b00f9c59f7bc8a15213d9f98a37
+private-bus.sh: bus pid 365476 at unix:path=/tmp/claude-1000/cbr.y9hNNN/bus/dbus-ypAtKbny44,guid=30a44e0919b4b8e85dcd75186b061f3b
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 79594ed91f46  C2 34230d885b2d (allowlist 47 files)
+nested display wayland-0 (cage 365826)
+== a-01-t: root a (pragma), C0 -> C1, mode t
+  [start]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:35'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:35'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:35'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [first-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [first-enable]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [first-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [second-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [released]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      2 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<arm>/control" is outside of the config folder.
+        1x WARN quickshell.qmlscanner: Module path "/tmp/claude-1000/cbr.y9hNNN/w/trim" is outside of the config folder.
+  [second-enable]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [second-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "de312a80"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  note: control before: Probe_QMLTYPE_171 v=one
+  note: loaded 8000 new components
+  note: control after: Probe_QMLTYPE_171 v=one
+  write order: 26 working-tree events in 5.4 ms (merge 42.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x26, -5.3 to -0.3 ms after the last write
+      +150.7 ms after the last write: pluginReloading true
+      +151.7 ms after the last write: panelLoader none
+      +151.7 ms after the last write: panelLoader none
+      +151.7 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a8200)
+      +161.7 ms after the last write: scanFinished installed=yes
+      +161.7 ms after the last write: pluginReloading false
+      +163.7 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a4ca0)
+      +187.7 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffea9def80)
+      +357.7 ms after the last write: pluginReloading true
+      +357.7 ms after the last write: panelLoader none
+      +357.7 ms after the last write: panelLoader none
+      +357.7 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a8200)
+      +370.7 ms after the last write: scanFinished installed=yes
+      +370.7 ms after the last write: pluginReloading false
+      +373.7 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffea9dec00)
+      +396.7 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffea9dd380)
+    a reload or load before the last write: no
+== b-01-t: root b (no pragma), C0 -> C1, mode t
+  [start]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:37'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:37'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.20.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer '3 channels \xb7 updated 17:37'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [first-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [first-enable]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [first-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [second-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [released]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [second-enable]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [second-open]
+    service  Service_QMLTYPE_142 | no reloadMarks (C0's Service.qml)
+    status   ready/3 ch, build running 0.20.0 onDisk 0.99.0 stale True; favorites 1; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "0fe19e9a"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  note: control before: Probe_QMLTYPE_171 v=one
+  note: loaded 8000 new components
+  note: control after: Probe_QMLTYPE_171 v=one
+  write order: 26 working-tree events in 5.3 ms (merge 41.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.3 ms (the host's debounce is 150 ms)
+    localPluginChanged x26, -5.4 to +0.6 ms after the last write
+      +150.6 ms after the last write: pluginReloading true
+      +151.6 ms after the last write: panelLoader none
+      +151.6 ms after the last write: panelLoader none
+      +151.6 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a6520)
+      +161.6 ms after the last write: scanFinished installed=yes
+      +161.6 ms after the last write: pluginReloading false
+      +164.6 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd2dec220)
+      +191.6 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2ded640)
+      +356.6 ms after the last write: pluginReloading true
+      +356.6 ms after the last write: panelLoader none
+      +356.6 ms after the last write: panelLoader none
+      +357.6 ms after the last write: services Service_QMLTYPE_142(0x7ffff02a6520)
+      +370.6 ms after the last write: scanFinished installed=yes
+      +370.6 ms after the last write: pluginReloading false
+      +372.6 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a4d80)
+      +389.6 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2f23720)
+    a reload or load before the last write: no
+== a-12-t: root a (pragma), C1 -> C2, mode t
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:38'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:38'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:38'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [first-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [first-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [first-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [second-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [released]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      2 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<arm>/control" is outside of the config folder.
+        1x WARN quickshell.qmlscanner: Module path "/tmp/claude-1000/cbr.y9hNNN/w/trim" is outside of the config folder.
+  [second-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [second-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "08252dcc"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  note: control before: Probe_QMLTYPE_175 v=one
+  note: loaded 8000 new components
+  note: control after: Probe_QMLTYPE_175 v=one
+  write order: 30 working-tree events in 5.4 ms (merge 41.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.2 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -5.6 to +0.4 ms after the last write
+      +151.4 ms after the last write: pluginReloading true
+      +152.4 ms after the last write: panelLoader none
+      +152.4 ms after the last write: panelLoader none
+      +152.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4680)
+      +162.4 ms after the last write: scanFinished installed=yes
+      +162.4 ms after the last write: pluginReloading false
+      +164.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a7860)
+      +188.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd00dcea0)
+      +357.4 ms after the last write: pluginReloading true
+      +357.4 ms after the last write: panelLoader none
+      +357.4 ms after the last write: panelLoader none
+      +357.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4680)
+      +370.4 ms after the last write: scanFinished installed=yes
+      +370.4 ms after the last write: pluginReloading false
+      +372.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd00e1900)
+      +389.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd0179ec0)
+    a reload or load before the last write: no
+== b-12-t: root b (no pragma), C1 -> C2, mode t
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:39'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:39'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:39'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [first-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [first-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [first-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [second-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [released]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [second-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: False
+    log      0 notable line(s) since the step before
+  [second-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "2e6eb71a"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  note: control before: Probe_QMLTYPE_175 v=one
+  note: loaded 8000 new components
+  note: control after: Probe_QMLTYPE_175 v=one
+  write order: 30 working-tree events in 5.6 ms (merge 41.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.2 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -6.0 to -0.0 ms after the last write
+      +151.0 ms after the last write: pluginReloading true
+      +152.0 ms after the last write: panelLoader none
+      +152.0 ms after the last write: panelLoader none
+      +152.0 ms after the last write: services Service_QMLTYPE_146(0x7fffeb8808c0)
+      +161.0 ms after the last write: scanFinished installed=yes
+      +161.0 ms after the last write: pluginReloading false
+      +165.0 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a7860)
+      +187.0 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd0521920)
+      +357.0 ms after the last write: pluginReloading true
+      +358.0 ms after the last write: panelLoader none
+      +358.0 ms after the last write: panelLoader none
+      +358.0 ms after the last write: services Service_QMLTYPE_146(0x7fffeb8808c0)
+      +371.0 ms after the last write: scanFinished installed=yes
+      +371.0 ms after the last write: pluginReloading false
+      +373.0 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a3960)
+      +390.0 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2e88400)
+    a reload or load before the last write: no
+crash journal after: 89
+rc=0
+
+==================================== R3
+codebehind-reload: work /tmp/claude-1000/cbr.8OKXKS; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 3200d22a4fc15b00f9c59f7bc8a15213d9f98a37
+private-bus.sh: bus pid 373146 at unix:path=/tmp/claude-1000/cbr.8OKXKS/bus/dbus-fFy2OtDSTb,guid=3aa41824e4a96bb33e1717466b0620b1
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 79594ed91f46  C2 34230d885b2d (allowlist 47 files)
+nested display wayland-0 (cage 373493)
+== a-12-w-c4: root a (pragma), C1 -> C2, mode w, git c4
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:41'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:41'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:41'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "538f7fa9"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 30 working-tree events in 7.4 ms (merge 44.0 ms)
+    closed, in order: BarWidget.qml, Service-pip.js, Service-player.js, Service-sources.js, manifest.json, Service-rewind.js, Guide.qml, model/build.mjs, Service.qml
+    Service.qml created before Service-rewind.js closed
+    largest gap between two working-tree events: 3.1 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -7.8 to +0.2 ms after the last write
+      +151.2 ms after the last write: pluginReloading true
+      +151.2 ms after the last write: panelLoader none
+      +151.2 ms after the last write: panelLoader none
+      +152.2 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a84a0)
+      +161.2 ms after the last write: scanFinished installed=yes
+      +161.2 ms after the last write: pluginReloading false
+      +164.2 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a68a0)
+      +188.2 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd00c0c00)
+      +356.2 ms after the last write: pluginReloading true
+      +356.2 ms after the last write: panelLoader none
+      +356.2 ms after the last write: panelLoader none
+      +356.2 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a84a0)
+      +370.2 ms after the last write: scanFinished installed=yes
+      +370.2 ms after the last write: pluginReloading false
+      +373.2 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd00c4be0)
+      +401.2 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcca8cfe0)
+    a reload or load before the last write: no
+== b-12-w-c4: root b (no pragma), C1 -> C2, mode w, git c4
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "4201227b"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 30 working-tree events in 8.4 ms (merge 45.0 ms)
+    closed, in order: Service-pip.js, BarWidget.qml, Service-sources.js, manifest.json, Service-player.js, Service-rewind.js, model/build.mjs, Service.qml, Guide.qml
+    Service.qml created before Service-player.js, Service-rewind.js closed
+    largest gap between two working-tree events: 3.9 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -7.9 to +0.1 ms after the last write
+      +151.1 ms after the last write: pluginReloading true
+      +152.1 ms after the last write: panelLoader none
+      +152.1 ms after the last write: panelLoader none
+      +152.1 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a52c0)
+      +161.1 ms after the last write: scanFinished installed=yes
+      +161.1 ms after the last write: pluginReloading false
+      +165.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a2fc0)
+      +188.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcdd5fa00)
+      +358.1 ms after the last write: pluginReloading true
+      +358.1 ms after the last write: panelLoader none
+      +358.1 ms after the last write: panelLoader none
+      +359.1 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a52c0)
+      +371.1 ms after the last write: scanFinished installed=yes
+      +371.1 ms after the last write: pluginReloading false
+      +373.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a3960)
+      +393.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2e77240)
+    a reload or load before the last write: no
+== a-12-w-g4: root a (pragma), C1 -> C2, mode w, git g4
+  [start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [watcher-reload]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [rescanPlugins]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [guide-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/3 ch, build running 0.99.0 onDisk 0.99.1 stale True; favorites 1; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "9e54d63d"}
+  at the end: state favorites ['t:one'], sources ['play.m3u']
+  note: update rc=0
+  write order: 30 working-tree events in 10.7 ms (merge 48.0 ms)
+    closed, in order: BarWidget.qml, Service-pip.js, manifest.json, model/build.mjs, Service-player.js, Service-rewind.js, Service-sources.js, Guide.qml, Service.qml
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 5.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -11.2 to -0.2 ms after the last write
+      +150.8 ms after the last write: pluginReloading true
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8580)
+      +162.8 ms after the last write: scanFinished installed=yes
+      +162.8 ms after the last write: pluginReloading false
+      +164.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a6980)
+      +188.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffe0b14fc0)
+      +358.8 ms after the last write: pluginReloading true
+      +358.8 ms after the last write: panelLoader none
+      +359.8 ms after the last write: panelLoader none
+      +359.8 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8580)
+      +371.8 ms after the last write: scanFinished installed=yes
+      +372.8 ms after the last write: pluginReloading false
+      +374.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffccd27ea0)
+      +403.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffccc56c20)
+    a reload or load before the last write: no
+== a-12-h1: root a (pragma), C1 -> C2, mode h1
+   not ready on the half tree
+  [half-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [completed-watcher]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-rescan]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      6 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:42'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "d22a8dc7"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: not ready within 20 s
+  note: not ready within 30 s
+  write order: 30 working-tree events in 5.7 ms (merge 40.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -5.9 to +2.1 ms after the last write
+      +153.1 ms after the last write: pluginReloading true
+      +154.1 ms after the last write: panelLoader none
+      +154.1 ms after the last write: panelLoader none
+      +154.1 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a5f00)
+      +165.1 ms after the last write: scanFinished installed=yes
+      +165.1 ms after the last write: pluginReloading false
+      +167.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a6520)
+      +191.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb957380)
+      +367.1 ms after the last write: pluginReloading true
+      +367.1 ms after the last write: panelLoader none
+      +367.1 ms after the last write: panelLoader none
+      +367.1 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a5f00)
+      +381.1 ms after the last write: scanFinished installed=yes
+      +381.1 ms after the last write: pluginReloading false
+      +383.1 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a8200)
+      +405.1 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcfd11c20)
+    a reload or load before the last write: no
+== b-12-h1: root b (no pragma), C1 -> C2, mode h1
+   not ready on the half tree
+  [half-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:43'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [completed-watcher]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:43'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-rescan]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer '3 channels \xb7 updated 17:43'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      0 notable line(s) since the step before
+  [completed-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Updated \xb7 restart the shell to see the new version'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:43'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      5 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 17:43'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "showLogos": false, "sourceKey": "27e6916f"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: not ready within 20 s
+  note: not ready within 30 s
+  write order: 30 working-tree events in 5.8 ms (merge 40.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x30, -5.5 to +3.5 ms after the last write
+      +154.5 ms after the last write: pluginReloading true
+      +155.5 ms after the last write: panelLoader none
+      +155.5 ms after the last write: panelLoader none
+      +155.5 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a7860)
+      +164.5 ms after the last write: scanFinished installed=yes
+      +164.5 ms after the last write: pluginReloading false
+      +166.5 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb861c80)
+      +190.5 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb89a0a0)
+      +368.5 ms after the last write: pluginReloading true
+      +368.5 ms after the last write: panelLoader none
+      +368.5 ms after the last write: panelLoader none
+      +368.5 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a7860)
+      +385.5 ms after the last write: scanFinished installed=yes
+      +385.5 ms after the last write: pluginReloading false
+      +386.5 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb899620)
+      +410.5 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a6b40)
+    a reload or load before the last write: no
+crash journal after: 89
+rc=0
+
+==================================== R4
+codebehind-reload: work /tmp/claude-1000/cbr.Ubtin2; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 3200d22a4fc15b00f9c59f7bc8a15213d9f98a37
+private-bus.sh: bus pid 394361 at unix:path=/tmp/claude-1000/cbr.Ubtin2/bus/dbus-pzYyrUFL8B,guid=e2eb6a44886e7a0d5e5c74226b062188
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 79594ed91f46  C2 34230d885b2d (allowlist 47 files)
+nested display wayland-0 (cage 394698)
+== a-12-h4: root a (pragma), C1 -> C2, mode h4
+   not ready on the half tree
+   not ready after the restart
+  [half-start]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      11 notable line(s) since the step before
+        4x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Ignoring unresolvable import "<plugin>/Service-player.js" from "<plugin>/Service.qml"
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [completed-watcher]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-rescan]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        3x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-open]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/0 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/0 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv"}
+  at the end: state favorites [], sources []
+  note: not ready within 20 s
+  note: not ready within 30 s
+  note: not ready within 30 s
+  write order: 29 working-tree events in 5.4 ms (merge 38.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.3 ms (the host's debounce is 150 ms)
+    localPluginChanged x29, -5.2 to +0.8 ms after the last write
+      +150.8 ms after the last write: pluginReloading true
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: services none
+      +160.8 ms after the last write: scanFinished installed=yes
+      +160.8 ms after the last write: pluginReloading false
+      +163.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb96da20)
+      +182.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcc717620)
+      +362.8 ms after the last write: pluginReloading true
+      +363.8 ms after the last write: panelLoader none
+      +363.8 ms after the last write: panelLoader none
+      +363.8 ms after the last write: services none
+      +375.8 ms after the last write: scanFinished installed=yes
+      +375.8 ms after the last write: pluginReloading false
+      +378.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a44c0)
+      +392.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcc7187a0)
+    a reload or load before the last write: no
+== b-12-h4: root b (no pragma), C1 -> C2, mode h4
+   not ready on the half tree
+   not ready after the restart
+  [half-start]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      9 notable line(s) since the step before
+        4x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [completed-watcher]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-rescan]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        3x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml:16:1: Script file://<plugin>/Service-player.js unavailable
+  [completed-open]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/0 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      7 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/0 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 360; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv"}
+  at the end: state favorites [], sources []
+  note: not ready within 20 s
+  note: not ready within 30 s
+  note: not ready within 30 s
+  write order: 29 working-tree events in 5.6 ms (merge 39.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x29, -5.2 to -0.2 ms after the last write
+      +150.8 ms after the last write: pluginReloading true
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: panelLoader none
+      +151.8 ms after the last write: services none
+      +160.8 ms after the last write: scanFinished installed=yes
+      +161.8 ms after the last write: pluginReloading false
+      +163.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb85fde0)
+      +183.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2f24260)
+      +364.8 ms after the last write: pluginReloading true
+      +364.8 ms after the last write: panelLoader none
+      +364.8 ms after the last write: panelLoader none
+      +364.8 ms after the last write: services none
+      +375.8 ms after the last write: scanFinished installed=yes
+      +375.8 ms after the last write: pluginReloading false
+      +378.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff02a8580)
+      +392.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd2f28400)
+    a reload or load before the last write: no
+crash journal after: 89
+rc=0
+
+==================================== R5
+codebehind-reload: work /tmp/claude-1000/cbr.kvUKUZ; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 3200d22a4fc15b00f9c59f7bc8a15213d9f98a37
+private-bus.sh: bus pid 405938 at unix:path=/tmp/claude-1000/cbr.kvUKUZ/bus/dbus-cBCiGh8aOQ,guid=adf2399fb37252a3bc755b826b062272
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 79594ed91f46  C2 34230d885b2d (allowlist 47 files)
+nested display wayland-0 (cage 406420)
+== a-01-h4: root a (pragma), C0 -> C1, mode h4
+   not ready on the half tree
+   not ready after the restart
+  [half-start]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      14 notable line(s) since the step before
+        4x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:15:1: Script file://<plugin>/Service-pip.js unavailable
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Ignoring unresolvable import "<plugin>/Service-pip.js" from "<plugin>/Service.qml"
+        1x WARN quickshell.qmlscanner: Ignoring unresolvable import "<plugin>/Service-player.js" from "<plugin>/Service.qml"
+        1x WARN quickshell.qmlscanner: Ignoring unresolvable import "<plugin>/Service-rewind.js" from "<plugin>/Service.qml"
+        1x WARN quickshell.qmlscanner: Ignoring unresolvable import "<plugin>/Service-sources.js" from "<plugin>/Service.qml"
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [completed-watcher]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:15:1: Script file://<plugin>/Service-pip.js unavailable
+  [completed-rescan]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:15:1: Script file://<plugin>/Service-pip.js unavailable
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        3x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: qs://<plugin>/Service.qml:15:1: Script file://<plugin>/Service-pip.js unavailable
+  [completed-open]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/0 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 0; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+  [restart-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/0 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 0; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv"}
+  at the end: state favorites [], sources []
+  note: not ready within 20 s
+  note: not ready within 30 s
+  note: not ready within 30 s
+  write order: 26 working-tree events in 5.6 ms (merge 47.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x26, -5.7 to +0.3 ms after the last write
+      +151.3 ms after the last write: pluginReloading true
+      +152.3 ms after the last write: panelLoader none
+      +152.3 ms after the last write: panelLoader none
+      +152.3 ms after the last write: services none
+      +161.3 ms after the last write: scanFinished installed=yes
+      +161.3 ms after the last write: pluginReloading false
+      +163.3 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffe0b25960)
+      +183.3 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffe0b2ac80)
+      +373.3 ms after the last write: pluginReloading true
+      +374.3 ms after the last write: panelLoader none
+      +374.3 ms after the last write: panelLoader none
+      +374.3 ms after the last write: services none
+      +385.3 ms after the last write: scanFinished installed=yes
+      +385.3 ms after the last write: pluginReloading false
+      +388.3 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb61d800)
+      +401.3 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffcca0b980)
+    a reload or load before the last write: no
+== a-01-h0: root a (pragma), C0 -> C1, mode h0
+   not ready on the half tree
+   not ready after the restart
+  [half-start]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.20.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      10 notable line(s) since the step before
+        4x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml: No such file or directory
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+  [completed-watcher]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml: No such file or directory
+  [completed-rescan]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      1 notable line(s) since the step before
+        1x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml: No such file or directory
+  [completed-disable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled False
+    guide    none | None; footer None
+    bar      none | None; bar.service is the service: None
+    log      0 notable line(s) since the step before
+  [completed-enable]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        3x WARN qml: service plugin load failed for io.github.rmcdavid.iptv: file://<plugin>/Service.qml: No such file or directory
+  [completed-open]
+    service  none | None
+    status   None; favorites None; refreshMinutes None; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | no reloadMark (C0's Guide.qml); footer ''
+    bar      BarWidget_QMLTYPE_78 | no reloadMark (C0's BarWidget.qml); bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  [restart]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/0 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 0; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      8 notable line(s) since the step before
+        2x MESA-EGL: warning: failed to get driver name for fd -1
+        1x MESA-EGL: warning: MESA-LOADER: failed to retrieve device information
+        1x WARN qt.qpa.services: Failed to register with host portal QDBusError("org.freedesktop.DBus.Error.ServiceUnknown", "The name org.freedesktop.portal.Desktop was not provided by any .service files")
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+        1x WARN: $HYPRLAND_INSTANCE_SIGNATURE is unset. Cannot connect to hyprland.
+        1x WARN qml: omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+        1x WARN qml: omarchy-iptv config shield: omarchy-iptv: config shield: omarchy/shell.json 0644 -> 0600
+  [restart-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C1 Service-pip.js, C1 Service-player.js, C1 Service-rewind.js, C1 Service-sources.js
+    status   ready/0 ch, build running 0.99.0 onDisk 0.99.0 stale False; favorites 0; refreshMinutes 360; installed 0.99.0; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer ''
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    log      3 notable line(s) since the step before
+        1x WARN: Failed to initialize layershell integration
+        1x WARN qt.qpa.wayland: Could not create wl_egl_window with size 0x0
+        1x WARN qt.qpa.wayland: eglSwapBuffers failed with 0x300d, surface: 0x0
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv"}
+  at the end: state favorites [], sources []
+  note: not ready within 20 s
+  note: not ready within 30 s
+  note: not ready within 30 s
+  write order: 25 working-tree events in 5.4 ms (merge 39.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+    Service.qml created before no code-behind closed
+    largest gap between two working-tree events: 1.4 ms (the host's debounce is 150 ms)
+    localPluginChanged x25, -5.4 to +0.6 ms after the last write
+      +150.6 ms after the last write: pluginReloading true
+      +151.6 ms after the last write: panelLoader none
+      +151.6 ms after the last write: panelLoader none
+      +151.6 ms after the last write: services none
+      +160.6 ms after the last write: scanFinished installed=yes
+      +160.6 ms after the last write: pluginReloading false
+      +162.6 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb960940)
+      +182.6 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd016d540)
+      +365.6 ms after the last write: pluginReloading true
+      +365.6 ms after the last write: panelLoader none
+      +365.6 ms after the last write: panelLoader none
+      +365.6 ms after the last write: services none
+      +376.6 ms after the last write: scanFinished installed=yes
+      +376.6 ms after the last write: pluginReloading false
+      +378.6 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd016d540)
+      +398.6 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a5720)
+    a reload or load before the last write: no
+crash journal after: 89
+rc=0
