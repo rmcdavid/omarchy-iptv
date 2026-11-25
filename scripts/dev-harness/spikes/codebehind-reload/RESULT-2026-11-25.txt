@@ -1,7 +1,7 @@
 scripts/dev-harness/spikes/codebehind-reload/RESULT-2026-11-25.txt
 
 D-REL-16's build stamps (L3), D-HOST-16 and D-A11Y-14 in the nested cage:
-L3's caged arms, lane-l3cage, 2026-11-25 (13:15 to 14:36 CST), branch
+L3's caged arms, lane-l3cage, 2026-11-25 (13:15 to 15:26 CST), branch
 l3cage from 6fb53e4. The reading is docs/QA-RESULTS.md "D-REL-16: L3's
 caged arms (lane-l3cage, 2026-11-25)".
 
@@ -32,13 +32,17 @@ under gdb, through a lane wrapper that printed the `# run` lines:
              RIG_RACE_DELAY_MS=0 RIG_RECOVER=clear-live  a-12-x a-12-x-c4 a-01-x
   M-text-<n> the same with RIG_RACE_FILE=model/text.mjs, n = 0 3
                                                  a-01-x a-01-x-c4
+  P-logos-<n> RIG_C2_PART=model/logos.mjs (candidates.py's knob: C2 and C3
+             change that part too, C2 bccf1b5, C3 952bc48), RIG_QMLCACHE=home
+             RIG_RACE_FILE=model/text.mjs RIG_RACE_DELAY_MS=<n>
+             RIG_RECOVER=clear-live, n = 3 1   a-12-x a-12-x-c4
 Builds (candidates.py, the same every run from 6fb53e4): C0 1321aff
 (0.20.0, local main = origin/main), C1 192a582 (6fb53e4's ALLOWLIST
 export, 0.99.0, every runtime file stamped 0.99.0, marks), C2 75982f3
 (0.99.1: the seven marked files and build.mjs restamped,
 Service-player.js's socketAttached renamed socketAttachedLive and
 Service.qml's forwarder calling the new name), C3 83a0e01 (0.99.2, the
-same files); 47 allowlisted files. R1c's builds are 8fa4998's (C1
+same files), without RIG_C2_PART; 47 allowlisted files. R1c's builds are 8fa4998's (C1
 f33734c), R1ma's and R1ma2's dce5268's (C1 72f0daf), R1mb's 80f80a0's
 (C1 4aefb3a). Host: omarchy 4.5.0-3 (shell.qml and
 services/PluginRegistry.qml pinned by make-root.py), quickshell
@@ -54,13 +58,14 @@ defect it fixed, not a poisoned unit (its final cache, read again with
 the fix, holds none); rig.qml.in's guide empty-state marks and
 analyze.py's no-service view lines from X-u-650 on; the views' verdict
 beside a service from before the stamps from B-man-0 on; the
-unattached-view naming and mode t's restart from T-2 on; the
+unattached-view naming and mode t's restart from T-2 on; RIG_C2_PART
+the P-logos runs; the
 reading-threw verdict was written after M-text-3 ran, so M-text-3's
 `agree` lines below read THE NOTICE DOES NOT FIT where f9ca702 reads that
 the reading threw and the notice fits, and T-1's four enable marks read
 DOES NOT FIT for the bar its resolve timer had not yet handed the
 service. Every arm was read again with f9ca702's analyze.py over its kept
-files: 293 `agree` lines in 43 arms, all fitting (R1c's rig carries no
+files: 329 `agree` lines in 47 arms, all fitting (R1c's rig carries no
 stamps and gives none).
 
 What is printed below is each run's stdout and stderr as written, the
@@ -8505,3 +8510,927 @@ crash journal after: 89
 codebehind-reload: kept /tmp/claude-1000/cbr.Bnr9bQ
 # run M-text-3: end 2026-11-25 14:36:45 CST rc=0
 # load 0.45 0.41 0.65; crash journal 89
+
+==== P-logos-3
+# run P-logos-3: start 2026-11-25 15:21:02 CST; tree <worktree> (2297cc0); vars RIG_DEV=6fb53e4 RIG_C0=main RIG_KEEP=1 RIG_C2_PART=model/logos.mjs RIG_QMLCACHE=home RIG_RACE_FILE=model/text.mjs RIG_RACE_DELAY_MS=3 RIG_RECOVER=clear-live; arms a-12-x a-12-x-c4
+# load 0.61 0.66 0.72; crash journal 89
+codebehind-reload: work /tmp/claude-1000/cbr.DiHLxW; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 6fb53e43d14f6ce298cdf1e22ddc8ef52d2bc284
+private-bus.sh: bus pid 2902824 at unix:path=/tmp/claude-1000/cbr.DiHLxW/bus/dbus-JF0HwMIwDQ,guid=9131ac82caf0dbf42d8154c06b07513e
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 192a582bc30d  C2 bccf1b5407f0  C3 952bc486b697 (allowlist 47 files)
+nested display wayland-0 (cage 2903336)
+== a-12-x: root a (pragma), C1 -> C2, mode x, the merge at the first open of model/text.mjs +3 ms, recover clear-live, Qt's own cache folder with XDG_CACHE_HOME unset
+   not ready after the race
+  [race-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      8 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [race-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [cleared-live]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      0 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:21'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "fe5f8e6a"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: race armed on model/text.mjs +3 ms, helper 2903407
+  note: merge rc=0
+  note: not ready within 40 s
+  note: cache folder removed: home/.cache/quickshell/qmlcache
+  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder, which came +1008.4 ms after run.sh started it):
+    manifest.json             -4.3 ms; opened again 22 time(s), first +51.3; no cache file
+    BarWidget.qml             +0.1 ms; opened again 3 time(s), first +38.5; no cache file
+    Guide.qml                 +1.1 ms; opened again 2 time(s), first +40.1; no cache file
+    Service.qml               +8.0 ms; opened again 2 time(s), first +44.0; no cache file
+    Model.mjs                +15.4 ms; opened again 3 time(s), first +17.5; its cache file saved +17.6
+    model/build.mjs          +18.3 ms; opened again 5 time(s), first +20.3; its cache file saved +19.6
+    Service-pip.js           +42.8 ms; opened again 5 time(s), first +60.4; its cache file saved +692.6
+    Service-player.js        +42.9 ms; opened again 5 time(s), first +60.6; its cache file saved +701.6
+    Service-rewind.js        +43.5 ms; opened again 5 time(s), first +61.2; its cache file saved +703.6
+    Service-sources.js       +43.5 ms; opened again 5 time(s), first +61.4; its cache file saved +710.6
+    from the first read of Service.qml to the first of a code-behind: 34.9 ms, to the last: 35.6 ms
+  write order: 33 working-tree events in 5.6 ms (merge 50.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+      Service.qml          unlinked +28.3, created +28.3, closed +29.4 ms after the merge started
+      Service-pip.js       unlinked +26.8, created +26.8, closed +26.9 ms after the merge started
+      Service-player.js    unlinked +27.0, created +27.0, closed +27.5 ms after the merge started
+      Service-rewind.js    unlinked +27.6, created +27.6, closed +27.7 ms after the merge started
+      Service-sources.js   unlinked +27.7, created +27.8, closed +28.2 ms after the merge started
+      Guide.qml            unlinked +24.8, created +24.8, closed +26.0 ms after the merge started
+      BarWidget.qml        unlinked +24.5, created +24.6, closed +24.7 ms after the merge started
+      manifest.json        unlinked +29.5, created +29.5, closed +29.5 ms after the merge started
+      model/build.mjs      unlinked +29.5, created +29.6, closed +29.8 ms after the merge started
+    h0: Service.qml absent 0.0 ms (unlinked +28.3, created +28.3); every changed file unlinked before the first create: no
+    h1: every changed code-behind closed before the old Service.qml went: yes
+    h4: the new Service.qml complete while every changed code-behind was already closed: no
+    largest gap between two working-tree events: 1.2 ms (the host's debounce is 150 ms)
+      +744.8 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8900)
+      +745.8 ms after the last write: scanFinished installed=yes
+      +820.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb7f2700)
+      +879.8 ms after the last write: scanFinished installed=yes
+      +925.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb7f7a20)
+    +47790.8 ms after the last write: panelLoader none
+    +49860.8 ms after the last write: rig up pid=2904610
+    +50564.8 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a3340)
+    +50564.8 ms after the last write: scanFinished installed=yes
+    +50640.8 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7ffff03fcf60)
+    +50708.8 ms after the last write: scanFinished installed=yes
+    +50772.8 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a8c80)
+    +53624.8 ms after the last write: panelLoader none
+    +55700.8 ms after the last write: rig up pid=2904884
+    +56408.8 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8660)
+    +56409.8 ms after the last write: scanFinished installed=yes
+    a reload or load before the last write: no
+  race: the trigger's open at 0; merge +8.0 to +58.0 ms
+    Service.qml          read -17.6; git closed +37.4; read after it +52.9; cache saved no file
+    Service-pip.js       read +17.2; git closed +34.9; read after it +49.5; cache saved +667.0
+    Service-player.js    read +17.3; git closed +35.5; read after it +50.2; cache saved +676.0
+    Service-rewind.js    read +17.9; git closed +35.7; read after it +50.9; cache saved +678.0
+    Service-sources.js   read +17.9; git closed +36.2; read after it +51.4; cache saved +685.0
+    Guide.qml            read -24.5; git closed +34.0; read after it +45.8; cache saved no file
+    BarWidget.qml        read -25.5; git closed +32.7; read after it +44.6; cache saved no file
+    Model.mjs            read -10.2; git closed unchanged; read after it never; cache saved -8.0
+    manifest.json        read -29.9; git closed +37.5; read after it +54.1; cache saved no file
+    model/build.mjs      read -7.3; git closed +37.8; read after it +54.5; cache saved -6.0
+  the QML disk cache (cache.py):
+  [cache race]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    model/build.mjs          saved 1795641674835  stamp -1  checksum 1c4472e9.. = C1; disk C2; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    Service-rewind.js        saved 1795641675519  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641675526  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641675508  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641674877  stamp -1  checksum 7976bf7f.. = C1; disk C2+C3; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    Service-player.js        saved 1795641675517  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-1]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    model/build.mjs          saved 1795641724769  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641675519  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641675526  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641675508  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641724776  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-player.js        saved 1795641675517  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-2]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    model/build.mjs          saved 1795641724769  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641675519  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641675526  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641675508  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641724776  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-player.js        saved 1795641675517  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache cleared]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    model/build.mjs          saved 1795641736613  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641737275  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641737280  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641737267  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641736647  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-player.js        saved 1795641737273  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    (0 other cache file(s): the root's own files and Qt's)
+== a-12-x-c4: root a (pragma), C1 -> C2, mode x, git c4, the merge at the first open of model/text.mjs +3 ms, recover clear-live, Qt's own cache folder with XDG_CACHE_HOME unset
+   not ready after the race
+  [race-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      8 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [race-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [cleared-live]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      0 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:22'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "96a40f64"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: race armed on model/text.mjs +3 ms, helper 2909826
+  note: merge rc=0
+  note: not ready within 40 s
+  note: cache folder removed: home/.cache/quickshell/qmlcache
+  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder, which came +1017.0 ms after run.sh started it):
+    manifest.json             -4.2 ms; opened again 20 time(s), first +58.3; no cache file
+    BarWidget.qml             +0.1 ms; opened again 2 time(s), first +37.5; no cache file
+    Guide.qml                 +1.4 ms; opened again 3 time(s), first +39.1; no cache file
+    Service.qml               +8.7 ms; opened again 2 time(s), first +45.3; no cache file
+    Model.mjs                +16.0 ms; opened again 3 time(s), first +18.3; its cache file saved +18.0
+    model/build.mjs          +19.4 ms; opened again 4 time(s), first +21.9; its cache file saved +22.0
+    Service-pip.js           +43.1 ms; opened again 4 time(s), first +92.0; its cache file saved +711.0
+    Service-player.js        +43.3 ms; opened again 5 time(s), first +78.5; its cache file saved +718.0
+    Service-rewind.js        +44.3 ms; opened again 4 time(s), first +93.4; its cache file saved +720.0
+    Service-sources.js       +44.5 ms; opened again 5 time(s), first +78.4; its cache file saved +725.0
+    from the first read of Service.qml to the first of a code-behind: 34.3 ms, to the last: 35.7 ms
+  write order: 33 working-tree events in 9.2 ms (merge 68.0 ms)
+    closed, in order: BarWidget.qml, Service-pip.js, Service-sources.js, Service-player.js, Service-rewind.js, Service.qml, manifest.json, Guide.qml, model/build.mjs
+      Service.qml          unlinked +38.7, created +46.7, closed +46.7 ms after the merge started
+      Service-pip.js       unlinked +38.6, created +45.9, closed +46.7 ms after the merge started
+      Service-player.js    unlinked +38.6, created +46.7, closed +46.7 ms after the merge started
+      Service-rewind.js    unlinked +38.7, created +46.7, closed +46.7 ms after the merge started
+      Service-sources.js   unlinked +38.7, created +46.7, closed +46.7 ms after the merge started
+      Guide.qml            unlinked +38.5, created +46.7, closed +46.8 ms after the merge started
+      BarWidget.qml        unlinked +38.5, created +42.8, closed +46.7 ms after the merge started
+      manifest.json        unlinked +38.7, created +46.8, closed +46.8 ms after the merge started
+      model/build.mjs      unlinked +38.8, created +46.8, closed +46.8 ms after the merge started
+    h0: Service.qml absent 8.0 ms (unlinked +38.7, created +46.7); every changed file unlinked before the first create: yes
+    h1: every changed code-behind closed before the old Service.qml went: no
+    h4: the new Service.qml complete while every changed code-behind was already closed: no
+    largest gap between two working-tree events: 4.0 ms (the host's debounce is 150 ms)
+      +748.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4760)
+      +748.4 ms after the last write: scanFinished installed=yes
+      +823.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb787900)
+      +884.4 ms after the last write: scanFinished installed=yes
+      +941.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb94f7a0)
+    +47787.4 ms after the last write: panelLoader none
+    +49859.4 ms after the last write: rig up pid=2911028
+    +50581.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4ae0)
+    +50581.4 ms after the last write: scanFinished installed=yes
+    +50656.4 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb786040)
+    +50764.4 ms after the last write: scanFinished installed=yes
+    +50826.4 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a2b60)
+    +53655.4 ms after the last write: panelLoader none
+    +55745.4 ms after the last write: rig up pid=2911299
+    +56457.4 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8580)
+    +56457.4 ms after the last write: scanFinished installed=yes
+    a reload or load before the last write: no
+  race: the trigger's open at 0; merge +7.0 to +75.0 ms
+    Service.qml          read -16.2; git closed +53.7; read after it +70.5; cache saved no file
+    Service-pip.js       read +18.1; git closed +53.7; read after it +67.0; cache saved +686.0
+    Service-player.js    read +18.3; git closed +53.7; read after it +67.7; cache saved +693.0
+    Service-rewind.js    read +19.4; git closed +53.7; read after it +68.4; cache saved +695.0
+    Service-sources.js   read +19.5; git closed +53.7; read after it +69.0; cache saved +700.0
+    Guide.qml            read -23.6; git closed +53.8; read after it +63.4; cache saved no file
+    BarWidget.qml        read -24.8; git closed +53.7; read after it +62.9; cache saved no file
+    Model.mjs            read -9.0; git closed unchanged; read after it never; cache saved -7.0
+    manifest.json        read -29.2; git closed +53.8; read after it +71.8; cache saved no file
+    model/build.mjs      read -5.6; git closed +53.8; read after it +72.1; cache saved -3.0
+  the QML disk cache (cache.py):
+  [cache race]
+    cache: 22 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641749575  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641749582  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641749577  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641749568  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641748879  stamp -1  checksum 1c4472e9.. = C1; disk C2; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-1]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641749575  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641749582  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641749577  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641749568  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641798837  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    model/build.mjs          saved 1795641798828  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-2]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641749575  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641749582  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641749577  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641749568  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641798837  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    model/build.mjs          saved 1795641798828  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache cleared]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.DiHLxW/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641811373  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641811380  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641811375  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641811367  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641810751  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    model/build.mjs          saved 1795641810721  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+crash journal after: 89
+codebehind-reload: kept /tmp/claude-1000/cbr.DiHLxW
+# run P-logos-3: end 2026-11-25 15:23:41 CST rc=0
+# load 0.84 0.71 0.73; crash journal 89
+
+==== P-logos-1
+# run P-logos-1: start 2026-11-25 15:24:03 CST; tree <worktree> (2297cc0); vars RIG_DEV=6fb53e4 RIG_C0=main RIG_KEEP=1 RIG_C2_PART=model/logos.mjs RIG_QMLCACHE=home RIG_RACE_FILE=model/text.mjs RIG_RACE_DELAY_MS=1 RIG_RECOVER=clear-live; arms a-12-x a-12-x-c4
+# load 0.60 0.66 0.71; crash journal 89
+codebehind-reload: work /tmp/claude-1000/cbr.kRjVwX; C0 1321afff9f0dcde96934424da23ae4767d61b496, C1 from 6fb53e43d14f6ce298cdf1e22ddc8ef52d2bc284
+private-bus.sh: bus pid 2916510 at unix:path=/tmp/claude-1000/cbr.kRjVwX/bus/dbus-LBckSFPJmu,guid=e2d4fe0f9980e726850042996b0751f4
+crash journal before: 89
+builds: C0 1321afff9f0d  C1 192a582bc30d  C2 bccf1b5407f0  C3 952bc486b697 (allowlist 47 files)
+nested display wayland-0 (cage 2917032)
+== a-12-x: root a (pragma), C1 -> C2, mode x, the merge at the first open of model/text.mjs +1 ms, recover clear-live, Qt's own cache folder with XDG_CACHE_HOME unset
+   not ready after the race
+  [race-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      8 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [race-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [cleared-live]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      0 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:24'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "4a430dc7"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: race armed on model/text.mjs +1 ms, helper 2917094
+  note: merge rc=0
+  note: not ready within 40 s
+  note: cache folder removed: home/.cache/quickshell/qmlcache
+  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder, which came +1013.5 ms after run.sh started it):
+    manifest.json             -4.8 ms; opened again 21 time(s), first +55.8; no cache file
+    BarWidget.qml             +0.1 ms; opened again 3 time(s), first +35.2; no cache file
+    Guide.qml                 +1.3 ms; opened again 2 time(s), first +36.8; no cache file
+    Service.qml               +8.9 ms; opened again 2 time(s), first +42.7; no cache file
+    Model.mjs                +16.3 ms; opened again 3 time(s), first +18.1; its cache file saved +17.5
+    model/build.mjs          +18.9 ms; opened again 5 time(s), first +20.4; its cache file saved +20.5
+    Service-pip.js           +40.6 ms; opened again 5 time(s), first +71.2; its cache file saved +708.5
+    Service-player.js        +40.8 ms; opened again 5 time(s), first +71.4; its cache file saved +714.5
+    Service-rewind.js        +41.8 ms; opened again 4 time(s), first +88.9; its cache file saved +716.5
+    Service-sources.js       +42.0 ms; opened again 5 time(s), first +72.3; its cache file saved +722.5
+    from the first read of Service.qml to the first of a code-behind: 31.8 ms, to the last: 33.1 ms
+  write order: 33 working-tree events in 7.5 ms (merge 66.0 ms)
+    closed, in order: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, manifest.json, model/build.mjs
+      Service.qml          unlinked +43.5, created +43.5, closed +45.1 ms after the merge started
+      Service-pip.js       unlinked +41.7, created +41.7, closed +41.9 ms after the merge started
+      Service-player.js    unlinked +41.9, created +41.9, closed +42.7 ms after the merge started
+      Service-rewind.js    unlinked +42.7, created +42.7, closed +42.8 ms after the merge started
+      Service-sources.js   unlinked +42.8, created +42.8, closed +43.5 ms after the merge started
+      Guide.qml            unlinked +38.8, created +38.8, closed +40.6 ms after the merge started
+      BarWidget.qml        unlinked +38.5, created +38.6, closed +38.8 ms after the merge started
+      manifest.json        unlinked +45.2, created +45.3, closed +45.3 ms after the merge started
+      model/build.mjs      unlinked +45.3, created +45.3, closed +45.6 ms after the merge started
+    h0: Service.qml absent 0.1 ms (unlinked +43.5, created +43.5); every changed file unlinked before the first create: no
+    h1: every changed code-behind closed before the old Service.qml went: yes
+    h4: the new Service.qml complete while every changed code-behind was already closed: no
+    largest gap between two working-tree events: 1.8 ms (the host's debounce is 150 ms)
+      +744.9 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4ae0)
+      +744.9 ms after the last write: scanFinished installed=yes
+      +828.9 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffeb929ac0)
+      +884.9 ms after the last write: scanFinished installed=yes
+      +945.9 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb95f200)
+    +47791.9 ms after the last write: panelLoader none
+    +49866.9 ms after the last write: rig up pid=2918295
+    +50588.9 ms after the last write: services Service_QMLTYPE_146(0x7fffeb92a960)
+    +50589.9 ms after the last write: scanFinished installed=yes
+    +50664.9 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffcfcbe5e0)
+    +50748.9 ms after the last write: scanFinished installed=yes
+    +50812.9 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffeb92a420)
+    +53674.9 ms after the last write: panelLoader none
+    +55743.9 ms after the last write: rig up pid=2918568
+    +56460.9 ms after the last write: services Service_QMLTYPE_146(0x7fffeb969960)
+    +56460.9 ms after the last write: scanFinished installed=yes
+    a reload or load before the last write: no
+  race: the trigger's open at 0; merge +6.0 to +72.0 ms
+    Service.qml          read -14.6; git closed +51.1; read after it +67.6; cache saved no file
+    Service-pip.js       read +17.2; git closed +47.9; read after it +64.0; cache saved +685.0
+    Service-player.js    read +17.4; git closed +48.7; read after it +64.8; cache saved +691.0
+    Service-rewind.js    read +18.4; git closed +48.8; read after it +65.5; cache saved +693.0
+    Service-sources.js   read +18.5; git closed +49.5; read after it +66.0; cache saved +699.0
+    Guide.qml            read -22.2; git closed +46.6; read after it +60.4; cache saved no file
+    BarWidget.qml        read -23.4; git closed +44.8; read after it +59.6; cache saved no file
+    Model.mjs            read -7.1; git closed unchanged; read after it never; cache saved -6.0
+    manifest.json        read -28.2; git closed +51.3; read after it +68.8; cache saved no file
+    model/build.mjs      read -4.6; git closed +51.6; read after it +69.2; cache saved -3.0
+  the QML disk cache (cache.py):
+  [cache race]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641856869  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641856871  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641856877  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641856863  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641856175  stamp -1  checksum 1c4472e9.. = C1; disk C2; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    model/logos.mjs          saved 1795641856223  stamp -1  checksum 7976bf7f.. = C1; disk C2+C3; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-1]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641856869  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641856871  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641856877  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641856863  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641906129  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    model/logos.mjs          saved 1795641906139  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-2]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641856869  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641856871  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641856877  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641856863  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641906129  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    model/logos.mjs          saved 1795641906139  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache cleared]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641918658  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641918660  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641918665  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641918652  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641917992  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    model/logos.mjs          saved 1795641918026  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+== a-12-x-c4: root a (pragma), C1 -> C2, mode x, git c4, the merge at the first open of model/text.mjs +1 ms, recover clear-live, Qt's own cache folder with XDG_CACHE_HOME unset
+   not ready after the race
+  [race-start]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      8 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [race-open]
+    service  Service_QMLTYPE_146 | C1 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   threw: TypeError: Property 'socketAttached' of object [object Object] is not a function; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C1 Guide.qml; footer 'Loaded mid-update \xb7 remove the QML cache, restart the shell'
+    bar      BarWidget_QMLTYPE_78 | C1 BarWidget.qml; bar.service is the service: True
+    build    notice 'cache'; mixed ['Service-pip.js', 'Service-player.js', 'Service-rewind.js', 'Service-sources.js']; running 0.99.0 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: BarWidget.qml, Guide.qml, Model.mjs, Service.qml, model/browse.mjs, model/build.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/logos.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js
+    views    guide notice 'cache' stamp '0.99.0'; bar notice 'cache' stamp '0.99.0'
+      bar tooltip 'IPTV \xb7 click to open the guide\nLoaded mid-update \xb7 remove ~/.cache/quickshell/qmlcache, then restart the shell'
+      bar name    'IPTV, idle, loaded mid-update, remove the QML cache and restart the shell'
+    agree    marks name a mix of C1, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  [cleared-live]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      0 notable line(s) since the step before
+  [restart]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+      guide empty 'emptyScope': 'No channels in All' / ''
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      6 notable line(s) since the step before
+        1x WARN quickshell.qmlscanner: Module path "<plugin>" is outside of the config folder.
+  [restart-open]
+    service  Service_QMLTYPE_146 | C2 Service.qml, C2 Service-pip.js, C2 Service-player.js, C2 Service-rewind.js, C2 Service-sources.js
+    status   ready/3 ch, build running 0.99.1 onDisk 0.99.1 stale False; favorites 0; refreshMinutes 120; installed 0.99.1; enabled True
+    guide    Guide_QMLTYPE_121 | C2 Guide.qml; footer '3 channels \xb7 updated 15:25'
+    bar      BarWidget_QMLTYPE_78 | C2 BarWidget.qml; bar.service is the service: True
+    build    notice ''; mixed []; running 0.99.1 onDisk 0.99.1 loadedDisk 0.99.1; 26 stamp(s)
+      stamps 0.99.0: Model.mjs, model/browse.mjs, model/channels.mjs, model/contrast.mjs, model/epg.mjs, model/form-edit.mjs, model/mpv.mjs, model/pip.mjs, model/player.mjs, model/privacy.mjs, model/rewind.mjs, model/settings.mjs, model/source-records.mjs, model/sources.mjs, model/state.mjs, model/text.mjs, model/view.mjs
+      stamps 0.99.1: BarWidget.qml, Guide.qml, Service-pip.js, Service-player.js, Service-rewind.js, Service-sources.js, Service.qml, model/build.mjs, model/logos.mjs
+    views    guide notice '' stamp '0.99.1'; bar notice '' stamp '0.99.1'
+      bar tooltip 'IPTV \xb7 click to open the guide'
+      bar name    'IPTV, idle'
+    agree    marks name one build, C2; stamps agree with every mark; the notice fits the marks
+    log      3 notable line(s) since the step before
+  at the end: bar entry {"id": "io.github.rmcdavid.iptv", "refreshMinutes": 120, "showLogos": false, "sourceKey": "59ff9134"}
+  at the end: state favorites [], sources ['play.m3u']
+  note: race armed on model/text.mjs +1 ms, helper 2923417
+  note: merge rc=0
+  note: not ready within 40 s
+  note: cache folder removed: home/.cache/quickshell/qmlcache
+  cold-start reads (the shell's first open of each file; +ms from its first open of the plugin folder, which came +1008.0 ms after run.sh started it):
+    manifest.json             -4.5 ms; opened again 21 time(s), first +56.0; no cache file
+    BarWidget.qml             +0.1 ms; opened again 2 time(s), first +35.7; no cache file
+    Guide.qml                 +1.2 ms; opened again 2 time(s), first +37.4; no cache file
+    Service.qml               +7.9 ms; opened again 2 time(s), first +43.2; no cache file
+    Model.mjs                +15.8 ms; opened again 3 time(s), first +17.5; its cache file saved +17.0
+    model/build.mjs          +18.4 ms; opened again 4 time(s), first +20.2; its cache file saved +20.0
+    Service-pip.js           +41.1 ms; opened again 5 time(s), first +73.7; its cache file saved +711.0
+    Service-player.js        +41.3 ms; opened again 4 time(s), first +88.4; its cache file saved +718.0
+    Service-rewind.js        +42.3 ms; opened again 4 time(s), first +88.9; its cache file saved +720.0
+    Service-sources.js       +42.4 ms; opened again 5 time(s), first +73.7; its cache file saved +725.0
+    from the first read of Service.qml to the first of a code-behind: 33.2 ms, to the last: 34.4 ms
+  write order: 33 working-tree events in 9.6 ms (merge 64.0 ms)
+    closed, in order: BarWidget.qml, Service-sources.js, Service-pip.js, Service-player.js, Service-rewind.js, Guide.qml, Service.qml, manifest.json, model/build.mjs
+      Service.qml          unlinked +38.2, created +44.1, closed +46.5 ms after the merge started
+      Service-pip.js       unlinked +38.1, created +43.8, closed +44.7 ms after the merge started
+      Service-player.js    unlinked +38.1, created +44.8, closed +45.5 ms after the merge started
+      Service-rewind.js    unlinked +38.2, created +45.6, closed +45.7 ms after the merge started
+      Service-sources.js   unlinked +38.2, created +43.9, closed +44.0 ms after the merge started
+      Guide.qml            unlinked +38.0, created +42.8, closed +45.8 ms after the merge started
+      BarWidget.qml        unlinked +38.0, created +42.2, closed +42.8 ms after the merge started
+      manifest.json        unlinked +38.4, created +46.5, closed +46.5 ms after the merge started
+      model/build.mjs      unlinked +38.4, created +45.0, closed +47.1 ms after the merge started
+    h0: Service.qml absent 5.9 ms (unlinked +38.2, created +44.1); every changed file unlinked before the first create: yes
+    h1: every changed code-behind closed before the old Service.qml went: no
+    h4: the new Service.qml complete while every changed code-behind was already closed: no
+    largest gap between two working-tree events: 3.8 ms (the host's debounce is 150 ms)
+      +748.5 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a5fe0)
+      +748.5 ms after the last write: scanFinished installed=yes
+      +825.5 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffd00b96c0)
+      +882.5 ms after the last write: scanFinished installed=yes
+      +923.5 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7fffd00bec80)
+    +47780.5 ms after the last write: panelLoader none
+    +49870.5 ms after the last write: rig up pid=2924622
+    +50582.5 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a8200)
+    +50582.5 ms after the last write: scanFinished installed=yes
+    +50660.5 ms after the last write: bar loaded BarWidget_QMLTYPE_78(0x7fffcfcf1620)
+    +50789.5 ms after the last write: scanFinished installed=yes
+    +50885.5 ms after the last write: panelLoader registered item=Guide_QMLTYPE_121(0x7ffff02a7cc0)
+    +53679.5 ms after the last write: panelLoader none
+    +55749.5 ms after the last write: rig up pid=2924894
+    +56462.5 ms after the last write: services Service_QMLTYPE_146(0x7ffff02a4bc0)
+    +56462.5 ms after the last write: scanFinished installed=yes
+    a reload or load before the last write: no
+  race: the trigger's open at 0; merge +6.0 to +70.0 ms
+    Service.qml          read -16.1; git closed +52.5; read after it +66.2; cache saved no file
+    Service-pip.js       read +17.1; git closed +50.7; read after it +64.0; cache saved +687.0
+    Service-player.js    read +17.3; git closed +51.5; read after it +64.4; cache saved +694.0
+    Service-rewind.js    read +18.3; git closed +51.7; read after it +64.9; cache saved +696.0
+    Service-sources.js   read +18.4; git closed +50.0; read after it +65.2; cache saved +701.0
+    Guide.qml            read -22.8; git closed +51.8; read after it +61.5; cache saved no file
+    BarWidget.qml        read -23.9; git closed +48.8; read after it +60.4; cache saved no file
+    Model.mjs            read -8.2; git closed unchanged; read after it never; cache saved -7.0
+    manifest.json        read -28.5; git closed +52.5; read after it +67.1; cache saved no file
+    model/build.mjs      read -5.6; git closed +53.1; read after it +67.2; cache saved -4.0
+  the QML disk cache (cache.py):
+  [cache race]
+    cache: 22 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641930861  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641930854  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641930868  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    Service-rewind.js        saved 1795641930863  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641930163  stamp -1  checksum 1c4472e9.. = C1; disk C2; code C1 (stamp 0.99.0): stale (recompiled at the next load)
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-1]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641930861  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641930854  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641930868  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641980132  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641930863  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641980123  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache restart-2]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641930861  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641930854  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641930868  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641980132  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641930863  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641980123  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+  [cache cleared]
+    cache: 23 file(s) under /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache, in /tmp/claude-1000/cbr.kRjVwX/w/arms/a-12-x-c4/home/.cache/quickshell/qmlcache
+    Service-player.js        saved 1795641992603  stamp -1  checksum 6821e160.. = C2; disk C2; code C2: agrees
+    Service-pip.js           saved 1795641992598  stamp -1  checksum dc8722b6.. = C2; disk C2; code C2: agrees
+    Service-sources.js       saved 1795641992610  stamp -1  checksum 65f5f266.. = C2; disk C2; code C2: agrees
+    model/logos.mjs          saved 1795641991973  stamp -1  checksum 6e3e7219.. = C2+C3; disk C2+C3; code C2 (stamp 0.99.1): agrees
+    Service-rewind.js        saved 1795641992605  stamp -1  checksum 2d61bf97.. = C2; disk C2; code C2: agrees
+    model/build.mjs          saved 1795641991943  stamp -1  checksum baf5c3ed.. = C2; disk C2; code C2 (stamp 0.99.1): agrees
+    (0 other cache file(s): the root's own files and Qt's)
+crash journal after: 89
+codebehind-reload: kept /tmp/claude-1000/cbr.kRjVwX
+# run P-logos-1: end 2026-11-25 15:26:42 CST rc=0
+# load 0.93 0.69 0.71; crash journal 89

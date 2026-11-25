@@ -715,7 +715,7 @@ reading"). For a code-behind that means three things beside what
   finding). `RIG_RECOVER=clear-live` removes the cache folder while the
   shell runs and then restarts, the README's order. None of it has run in a
   cage yet: the arms are the display lane's. **[2026-11-25, lane-l3cage: run,
-  in 44 arms (QA-RESULTS "D-REL-16: L3's caged arms"). The stamps agreed
+  in 48 arms (QA-RESULTS "D-REL-16: L3's caged arms"). The stamps agreed
   with the marks in every arm once four of the rig's readouts were fixed
   (f9ca702: cache.py's model reading, F-HARNESS-134; analyze.py's
   no-service, pre-stamp, unattached-view and reading-threw verdicts,

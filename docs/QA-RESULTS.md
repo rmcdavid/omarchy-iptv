@@ -29309,7 +29309,7 @@ lists both views' stamps: the guide under the host's own panel loader, cut
 byte for byte, the bar under the rig's reduction of Bar.qml's widget
 host), the hand-off at a real rescan, the
 a11y probe's L2-BAR-08 on the bus (P2), B44 live (K1, K2, K3), the rig's
-analyze lines over real arms (43 arms, with f9ca702's fixes), the
+analyze lines over real arms (47 arms, with f9ca702's fixes), the
 clear-live order (7 of 7 poisoned cases recovered) and b-01-x. CONTRADICTED
 -- V4 failing the module link on a missing named export: the plugin loads
 with no model and says `Loaded mid-update` (D-DOC-40). STILL UNVERIFIED --
@@ -29349,7 +29349,7 @@ l3-bar-no-report.patch through `--tree`, B44 red at `files:25`; and the
 caged a11y probe with L2-BAR-08 green. In every arm analyze.py's `agree`
 line must read that the notice fits the marks. **[2026-11-25, lane-l3cage:
 every arm ran within its bounds, and with the rig as f9ca702 fixed it,
-all 293 `agree` lines fit; the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)" below]**
+all 329 `agree` lines fit; the section "D-REL-16: L3's caged arms (lane-l3cage, 2026-11-25)" below]**
 
 ## D-REL-16: the three rechecks of 1c64c77 (lane-l3fix, 2026-11-25)
 
@@ -29566,9 +29566,10 @@ and watch logs, each run's output, the scenario transcripts and the
 probe's per-check results) is the lane's scratch folder `arms/` and
 `runs/`, 6.3 MB, named in its result for the lead.
 
-**The answer.** Every arm the brief named ran, within its bounds. The
+**The answer.** Every arm the brief named ran, within its bounds, and 4
+races more at a model part made to change (section 6). The
 stamps say what the marks say in every arm: with the rig as fixed here
-(f9ca702), the 293 `agree` lines of the 43 stamped arms all read that the
+(f9ca702), the 329 `agree` lines of the 47 stamped arms all read that the
 notice fits the marks. The README's order, the cache folder removed while
 the shell runs and then a restart (`RIG_RECOVER=clear-live`), recovered
 every poisoned case it was tried on (7 of 7, both roots, a code-behind,
@@ -29600,8 +29601,9 @@ The rig as committed at 6fb53e4 printed R1 to X-cl-633; cache.py's fix
 analyze.py's no-service view lines X-u-650 on; the pre-stamp views'
 verdict B-man-0 on; the unattached-view naming and mode t's restart T-2
 on; the reading-threw verdict none (it was written after M-text-3, from
-M-text-3's marks). Every arm was read again with f9ca702's analyze.py over
-its kept files; that is where the 293 lines are counted.
+M-text-3's marks); candidates.py's `RIG_C2_PART` the P-logos runs (without
+it the builds are the same four commits). Every arm was read again with f9ca702's analyze.py over
+its kept files; that is where the 329 lines are counted.
 
 | run | CST | arms | env beyond `RIG_DEV=6fb53e4 RIG_C0=main RIG_KEEP=1` |
 |---|---|---|---|
@@ -29621,6 +29623,7 @@ its kept files; that is where the 293 lines are counted.
 | T-2 | 14:20-14:24 | a-12-t b-12-t | - (mode t now restarts after its toggles) |
 | M-build-0 | 14:24-14:27 | a-12-x a-12-x-c4 a-01-x | `RIG_QMLCACHE=home RIG_RACE_FILE=model/build.mjs RIG_RACE_DELAY_MS=0 RIG_RECOVER=clear-live` |
 | M-text-0, -3 | 14:28-14:36 | a-01-x a-01-x-c4 | `RIG_RACE_FILE=model/text.mjs RIG_RACE_DELAY_MS=0 / 3`, otherwise the same |
+| P-logos-3, -1 | 15:21-15:26 | a-12-x a-12-x-c4 | `RIG_C2_PART=model/logos.mjs` (C2 bccf1b5 and C3 952bc48 change that part too) `RIG_QMLCACHE=home RIG_RACE_FILE=model/text.mjs RIG_RACE_DELAY_MS=3 / 1 RIG_RECOVER=clear-live` |
 | K1 | 13:18-13:28 | `key-scenario.sh live` | a `git clone --shared` of l3cage at 6fb53e4 (its own v0.13.6 tag), private-bus.sh |
 | K2 | 13:29 | `... live --only BUILD --tree <export of 6fb53e4 with l3-bar-no-report.patch>` | the same |
 | K3 | 13:29-13:30 | `... live --only BUILD` | the same |
@@ -29829,6 +29832,16 @@ clear and update 2 each. Every race:
   words reach the user (D-DOC-40, filed below).
 - **A stamped part's `var` surviving as the old build's stays reasoned:**
   C2 changes no part but build.mjs, and build.mjs could not be poisoned.
+  So candidates.py gained `RIG_C2_PART` (a comment line in one part, which
+  C2's cut then restamps at 0.99.1), and 4 more races fired at text.mjs
+  with `RIG_C2_PART=model/logos.mjs` (P-logos-3, P-logos-1; 4 beyond the
+  brief's bound of 4 at that trigger, spent to reach a stamped part):
+  none poisoned. At +3 ms, one worker, the engine opened logos.mjs at
+  +26.8 and +30.5 ms after the trigger and saved its unit at +36.0, and
+  git wrote it at +37.9 to +38.2, 2 ms late; at +1 ms the write came at
+  +51.7, 6.7 ms after the save at +45.0 (the merge's own start moves more
+  than the window is wide); at four workers git unlinked the part before
+  its unit was saved, and no unit was kept. Every restart read `""`.
   When build.mjs itself is stale its tell is `running` and
   `stamps["model/build.mjs"]` at the old version, not `mixed` (lane-l3fix's
   note); not reached here.
@@ -29887,6 +29900,11 @@ lane's files. It stays UNVERIFIED.
   rig.qml.in reads the guide's empty state (its title and prose: the
   no-service words), and mode t restarts after its toggles, which is what
   the README says ends the misread.
+- **candidates.py's `RIG_C2_PART` (an addition, not a fix).** Set to a
+  model part, C2 changes that part's first comment after its stamp, so
+  C2's cut restamps it; unset, candidates.py built the same four commits
+  (192a582, 75982f3, 83a0e01 over 1321aff) as every run before it, read
+  back by building both ways in scratch.
 
 ### Filed
 
