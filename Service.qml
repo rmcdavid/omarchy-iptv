@@ -2929,19 +2929,27 @@ Item {
   FileView {
     id: manifestFile
     path: root.manifestPath
-    // The second way is the watcher, for an in-place edit. It is NOT what
-    // catches an update. D-HOST-2: an update REPLACES the file rather than
-    // editing it -- measured, a git fast-forward took manifest.json from
-    // inode 495084 to 495097 -- so a watcher bound to the old inode never
-    // fires, and the notice this exists for stayed silent through the exact
-    // update it was built to catch. A replacement raises nothing and leaves
-    // the view watching nothing until a reload re-arms it (the contract's
-    // FileView facts, measured on stateFile). Until D-HOST-16 this said an
-    // in-place edit was "free to catch" while nothing answered the watcher:
-    // Quickshell's FileView.qml declares no fileChanged handler, and every
-    // view measured here reloads from its own onFileChanged, so the handler
-    // below is what makes the watch read anything (whether the C++ view
-    // would ever reload by itself is read nowhere and not measured).
+    // The second way is the watcher, and the handler below is what makes
+    // it read anything: Quickshell's FileView.qml declares no fileChanged
+    // handler, and every view measured here reloads from its own
+    // onFileChanged (whether the C++ view would ever reload by itself is
+    // read nowhere and not measured). An update REPLACES the file rather
+    // than editing it -- git unlinks manifest.json and creates it anew;
+    // measured, a fast-forward took it from inode 495084 to 495097 -- and
+    // the watch FIRES at that. D-DOC-39: until 2026-11-25 this said a
+    // watcher bound to the old inode never fires (D-HOST-2's stated cause)
+    // and that this way catches only an in-place edit. L3's caged arms
+    // measured otherwise: with the root's handler above removed, this one
+    // read the new manifest in 5 of 5 updates, three of them across the
+    // 5 to 6 ms that four of git's workers left between the unlink and the
+    // create, and a view with no handler read the old one. So what kept
+    // the notice silent through the update it was built for fits no
+    // handler answering, not a watch that never fired (that release was
+    // not measured again), and which of the kernel's events raises the
+    // signal is read, not watched.
+    // The contract's "a replacement raises nothing and leaves the view
+    // watching nothing" is measured on stateFile behind a LINK, another
+    // shape. No way here leans on this one alone.
     watchChanges: true
     printErrors: false
     onFileChanged: reload()
@@ -2953,8 +2961,10 @@ Item {
     onLoadFailed: root.onDiskVersion = ""
   }
 
-  // The third way: re-read the manifest from its PATH, which is the only way
-  // to see a file that was replaced underneath us. Called when the guide
+  // The third way: re-read the manifest from its PATH, which needs no
+  // signal at all, so it holds whatever the watcher and the host's hand-off
+  // did (D-DOC-39: this said it was the only way to see a replaced file,
+  // and the watcher sees one too). Called when the guide
   // opens: that is the moment the notice would be shown, so it is the moment
   // the answer has to be current, and it costs one small read against a
   // 150 ms budget whose open work measures about 20 ms.

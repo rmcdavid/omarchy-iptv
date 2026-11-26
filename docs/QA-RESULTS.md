@@ -30273,3 +30273,33 @@ row's first way (compile the binding in node), with no change to shipped
 code. Not held, and stated on the row: the footer's own hand-off of
 `root.cacheFolder` to its composer is run by no node check, and what the
 installed `Quickshell.env` answers for an unset name stays F-HARNESS-133's.
+
+## D-DOC-39: the comments corrected (the nightly run, 2026-11-26)
+
+The lead's settle of L3's caged arms left eight places that still gave
+D-HOST-2's stated cause, "a watcher bound to the old inode never fires",
+to be corrected together. They are, in one commit:
+
+- Service.qml, over manifestFile's watcher: the watch fires when an update
+  replaces the file, and the view's own `onFileChanged` is what reads; with
+  the root's handler removed it read the new manifest in 5 of 5 caged
+  updates, three of them across the 5.0 to 6.3 ms that four of git's
+  workers left between the unlink and the create, and a view with no
+  handler read the old one. What kept the notice silent through the update
+  it was built for fits no handler answering; that release was not measured
+  again. The contract's "raises nothing" facts are a linked `state.json`'s.
+- Service.qml, over `recheckBuild`: the re-read needs no signal; it is not
+  "the only way to see a file that was replaced".
+- Guide.qml, over its `recheckBuild` call: the same.
+- tests/service-harness.js, twice: the `manifestDisk` double is the silent
+  replacement on purpose, the less forgiving of the two, and `manifestEdit`
+  is the arm where the watch fires.
+- tests/Model.test.js, three times: the D-HOST-2 pin's comment, the first
+  D-HOST-16 boot's comment, and the name of the `recheckBuild` check.
+
+Comments and one check's name only. The node suite runs the same 4175
+checks. Searched (rule 15) over the shipped QML, the code-behinds and the
+two test files for "never fires", "old inode", "replaced underneath",
+"raises nothing", "raised nothing", "nothing raised" and "watch lost":
+the other hits are about the linked `state.json`, a Timer and the cache's
+reload, and stand. CHANGELOG.md's 0.7.8 entry stays as released.

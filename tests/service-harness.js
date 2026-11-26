@@ -789,10 +789,17 @@ class StateFile {
 //                          without one reads nothing (whether the C++ view
 //                          would reload by itself is not measured; a double
 //                          that does not is the less forgiving of the two)
-//   a replacement          (assigning h.manifestDisk: an update's shape, git
-//                          replaces the file, D-HOST-2) raises nothing and
+//   a replacement          (assigning h.manifestDisk) raises nothing and
 //                          leaves the view watching nothing until a reload
-//                          re-arms it (the eighth fact, R26c)
+//                          re-arms it (the eighth fact, R26c, measured on a
+//                          LINKED state.json). D-DOC-39: it is NOT what the
+//                          real view did at git's update, where the watch
+//                          fired and its reload read the new file (L3's
+//                          caged arms, 2026-11-25). The double stays the
+//                          silent one on purpose: it is the less forgiving
+//                          of the two, so a boot that reads the new version
+//                          after it proves the hand-off or the re-read, and
+//                          h.manifestEdit is the arm where the watch fires
 // `disk` is the file's text, null for no file.
 class ManifestFile {
   constructor(text) {
@@ -1158,7 +1165,9 @@ function bootService(svc, Model, o) {
     mf.disk = text
     if (mf.watching && mf.armed) h.later.push({ fn: onManifestFileChanged, args: [] })
   }
-  // A replacement (an update's shape): nothing raised, the watch lost.
+  // A replacement with nothing raised and the watch lost: the silent case,
+  // kept as the less forgiving one (D-DOC-39: at git's update the real
+  // watch fired; h.manifestEdit above is that arm).
   Object.defineProperty(h, "manifestDisk", {
     get() { return h.manifestFile.disk },
     set(v) { h.manifestFile.disk = v; h.manifestFile.armed = false },

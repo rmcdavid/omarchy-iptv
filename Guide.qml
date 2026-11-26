@@ -1097,9 +1097,11 @@ Item {
     root.switchPendingLeave = false
     root.sourcesNotice = ""
     root.opened = true
-    // D-HOST-2: ask the service to re-read its manifest from the PATH. An
-    // update replaces that file, so the FileView's watcher never fires and the
-    // stale-build notice stayed silent through the exact update it exists for.
+    // D-HOST-2: ask the service to re-read its manifest from the PATH, so
+    // the stale-build notice needs no signal to be current: it stayed silent
+    // through the exact update it exists for. D-DOC-39: this said the
+    // FileView's watcher never fires when an update replaces the file; it
+    // does (measured 2026-11-25), and nothing answered it then.
     // Here, because opening is when the notice would be read.
     //
     // Guarded on the FUNCTION, not on serviceReady. This file's own rule, two

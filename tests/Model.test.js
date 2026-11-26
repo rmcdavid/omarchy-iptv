@@ -3995,11 +3995,13 @@ checkCall("D-HOST-1: the notice sits below a real warning and above the plain co
 // re-read, and calls it guarded on the function (D-A11Y-8's spelling; the
 // parse after the D-REL-16 block holds every call in open() to the guard).
 checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest from its PATH, guarded on the function", function () {
-  // The watcher is not what makes this work, and D-HOST-2 is the proof: an
-  // update REPLACES the file -- measured, a git fast-forward took manifest.json
-  // from inode 495084 to 495097 -- so a FileView bound to the old inode never
-  // fires. 0.7.5 carried the check, had the right ladder order, and stayed
-  // silent through the 0.7.5 -> 0.7.7 update it was built to catch.
+  // The re-read needs no signal, which is why it is here. An update REPLACES
+  // the file -- measured, a git fast-forward took manifest.json from inode
+  // 495084 to 495097 -- and 0.7.5 carried the check, had the right ladder
+  // order, and stayed silent through the 0.7.5 -> 0.7.7 update it was built
+  // to catch. D-DOC-39: this said a FileView bound to the old inode never
+  // fires; the watch does fire at git's update (measured 2026-11-25), and
+  // what fits that silence is that no handler answered it.
   return qmlSites(/typeof root\.service\.recheckBuild === "function"\) root\.service\.recheckBuild\(\)/).length
 }, 1)
 // ---- D-HOST-16: the manifest re-read follows the host and the watcher -----
@@ -4027,7 +4029,9 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
   checkCall("D-HOST-16: an update's rescan hands the kept service a fresh manifest, and status reads the new version on disk with no guide open", () => {
     const h = boot()
     const started = build(h)
-    // The update REPLACES manifest.json (D-HOST-2): the view raises nothing.
+    // The update REPLACES manifest.json. The double raises nothing here,
+    // the silent case (D-DOC-39: the real watch fires at git's update), so
+    // what follows shows the rescan's hand-off alone.
     h.manifestDisk = manifestOf(OTHER)
     h.runLater()
     const replaced = build(h)
@@ -4164,7 +4168,7 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     return [first, h.root.buildNotice, h.root.loadedDisk, h.root.onDiskVersion, notices(h)]
   }, [["cache", OTHER, OTHER], "", OTHER, V, [0, 0]])
 
-  checkCall("D-REL-16: the guide's open re-reads the manifest from its PATH (recheckBuild), where a replacement raised nothing", () => {
+  checkCall("D-REL-16: the guide's open re-reads the manifest from its PATH (recheckBuild), with no signal raised at the replacement", () => {
     const h = boot()
     h.runLater()
     h.manifestDisk = manifestOf(OTHER)
