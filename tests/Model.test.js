@@ -4466,6 +4466,45 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     return [at({ QML_DISABLE_DISK_CACHE: "1" }), at({ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }),
             at({ XDG_CACHE_HOME: "/srv/u7/cache" }), at({ QML_DISK_CACHE_PATH: "/srv/u7/qc" })]
   }, [[0, ""], [0, DEF], [0, "$XDG_CACHE_HOME/quickshell/qmlcache"], [0, "$QML_DISK_CACHE_PATH"]])
+  // F-GATE-34: the guide reads the environment ITSELF (with no service
+  // nothing else can), and until this check only the service's copy of the
+  // loop ran anywhere: a guide that handed the composer `{}` passed every
+  // check. So the guide's own bindings are compiled from Guide.qml and run
+  // against a fake Quickshell.env that answers by name and records what it
+  // was asked.
+  const guideBinding = name => {
+    const p = require("./service-harness.js").rootProperties(guideSource).filter(q => q.name === name)
+    if (p.length !== 1 || p[0].expr === null) throw new Error("Guide.qml declares " + p.length + " bound `" + name + "`")
+    return p[0].expr
+  }
+  const guideFolder = (env, model) => {
+    const asked = []
+    const qs = { env: n => { asked.push(n); return Object.prototype.hasOwnProperty.call(env, n) ? env[n] : "" } }
+    const folder = new Function("Model", "Quickshell", guideBinding("cacheFolder"))(model || Model, qs)
+    return { folder, asked }
+  }
+  checkCall("F-GATE-34: the guide's own cacheFolder binding asks Quickshell.env for every variable the composer reads, each once", () =>
+    guideFolder({}).asked.slice().sort(), Model.QML_CACHE_ENV.slice().sort())
+  checkCall("F-GATE-34: the guide's own cacheFolder binding follows the shell's environment -- off, forced, XDG, the path, none", () => [
+    guideFolder({ QML_DISABLE_DISK_CACHE: "1" }).folder,
+    guideFolder({ QML_DISABLE_DISK_CACHE: "1", QML_FORCE_DISK_CACHE: "1" }).folder,
+    guideFolder({ XDG_CACHE_HOME: "/srv/u7/cache" }).folder,
+    guideFolder({ QML_DISK_CACHE_PATH: "/srv/u7/qc" }).folder,
+    guideFolder({}).folder,
+  ], ["", DEF, "$XDG_CACHE_HOME/quickshell/qmlcache", "$QML_DISK_CACHE_PATH", DEF])
+  checkCall("F-GATE-34: a model that cannot say gives the guide null, never a throw (an older model beside this guide)", () => [
+    guideFolder({ XDG_CACHE_HOME: "/srv/u7/cache" }, {}).folder,
+    guideFolder({}, { QML_CACHE_ENV: ["XDG_CACHE_HOME"] }).folder,
+  ], [null, null])
+  checkCall("F-GATE-34: the guide's no-service body is composed from that folder, and reads the plain restart when the model cannot compose", () => {
+    const body = (folder, model) => new Function("Model", "root", guideBinding("serviceMissingText"))(model || Model, { cacheFolder: folder })
+    return [body(guideFolder({ XDG_CACHE_HOME: "/srv/u7/cache" }).folder), body(guideFolder({ QML_DISABLE_DISK_CACHE: "1" }).folder), body(null), body(DEF, {})]
+  }, [
+    "Run omarchy restart shell" + SEP + "if that does not help, remove $XDG_CACHE_HOME/quickshell/qmlcache and restart again",
+    "Run omarchy restart shell",
+    "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
+    "Run omarchy restart shell",
+  ])
 })()
 // END D-REL-16 WORDS
 

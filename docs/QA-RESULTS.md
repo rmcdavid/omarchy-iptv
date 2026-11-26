@@ -30238,3 +30238,38 @@ part's `var` surviving a poisoned unit, Qt's cache switches and a relative
 `$XDG_CACHE_HOME`, whether `reportedStamps` keeps a null prototype,
 rig.qml.in's `guideServiceIsNull` and `barServiceIsNull`, and L2-BAR-08
 seen red. The full gate ran on the merged dev tree before the push.
+
+## F-GATE-34: the guide's own environment read, held (the nightly run, 2026-11-26)
+
+The guide asks the shell's environment itself for where Qt's QML cache is,
+because with no service nothing else can, and until today only the
+service's copy of that loop ran in any test: a guide that handed the
+composer an empty object passed all 4171 node checks. tests/Model.test.js
+now reads the guide's own `cacheFolder` and `serviceMissingText` bindings
+out of Guide.qml with the service harness's `rootProperties`, compiles
+them, and runs them against a fake `Quickshell.env` that answers by name
+and records each name it is asked.
+
+Four checks, 4171 -> 4175, 0 failures on the tree:
+
+- every name in `Model.QML_CACHE_ENV` is asked, each once;
+- the folder follows the environment: the cache off, forced, under
+  `$XDG_CACHE_HOME`, at `$QML_DISK_CACHE_PATH`, and none set;
+- a model that cannot say gives null, never a throw;
+- the no-service body is composed from that folder, and reads the plain
+  restart when the model cannot compose.
+
+Shown red, each mutant on Guide.qml alone, then restored (rule 11):
+
+| Mutant | Checks red |
+|---|---|
+| `Model.qmlCacheFolder({})`, the row's own | 2 |
+| the loop starts at 1, so one variable is never asked | 3 |
+| `Model.serviceMissingProse(null)` | 1 |
+| the binding's catch answers "" instead of null | 1 |
+
+The lead's call under the owner's standing authority of 2026-11-09: the
+row's first way (compile the binding in node), with no change to shipped
+code. Not held, and stated on the row: the footer's own hand-off of
+`root.cacheFolder` to its composer is run by no node check, and what the
+installed `Quickshell.env` answers for an unset name stays F-HARNESS-133's.

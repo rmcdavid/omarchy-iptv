@@ -843,7 +843,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-113}
 # QML_FORCE_DISK_CACHE, QML_CACHE_ENV held to what the composer reads, and
 # the service's folder from a boot's environment (red first, 5 of the 6 new
 # words checks); the suite runs 4171, and 4171 without the own-write echo.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4171}
+# 2026-11-26, the nightly run (F-GATE-34): 4171 -> 4175 -- the guide's own
+# cacheFolder and serviceMissingText bindings compiled from Guide.qml and
+# run against a fake Quickshell.env (red on a guide that hands the composer
+# {}, and on three more mutants); the suite runs 4175.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4175}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
