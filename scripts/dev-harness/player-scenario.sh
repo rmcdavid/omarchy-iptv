@@ -1150,7 +1150,12 @@ ck "P5 still nothing channel-specific on the command line" '[[ -n "$swept" && "$
 
 echo "== P8 a second service on the same runtime dir adopts the player"
 OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" --detach --keep --timeout 0 --instance 2 --playlist "$FIX/player.m3u" >>"$LOG" 2>&1
-sleep 4
+# F-HARNESS-83: the second shell was read after a fixed `sleep 4`, and under
+# load (6.8) it had not answered yet: NOFIELD, a false FAIL. Wait for it to
+# name the channel, bounded, as P4 and P5 wait; then the second it would
+# need to show a player or a window of its own, which the counts below ask.
+until_eq "t:live2" 20 np2 id || true
+sleep 1
 is "P8 still exactly one player with two shells up" "$(player_count)" "1"
 is "P8 still exactly one window" "$(windows_named)" "1"
 is "P8 the second shell adopted the same channel" "$(np2 id)" "t:live2"

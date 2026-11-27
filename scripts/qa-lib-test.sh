@@ -2771,6 +2771,40 @@ is "H6 with H6a refused: nothing was hidden, so nothing is sent and nothing unhi
 is "H6a sent and hiding nothing, H6b refused: a FAIL and a SKIP, and no remove, which would HIDE the group" \
    "$(m3_h6 0 0 1)" 'pass=0 fail=1 skip=1 hidden=[] ipc= keys=2'
 
+# F-HARNESS-83: player-scenario's P8 read the second shell after a fixed
+# `sleep 4`. Its block's own text (from its banner to the check after the
+# second shell leaves) and the scenario's own until_eq run over stubs: the
+# second shell answers NOFIELD for its first $1 reads and the channel from
+# then on, and `sleep` only counts. On 6a398e0's player-scenario.sh a
+# shell ready at its 60th read gives "pass=3 fail=1": the false FAIL.
+ps_p8_block=$(awk '/^echo "== P8 a second service/ { on = 1 } on { print } on && /^is "P8 the second shell leaving/ { exit }' "$ROOT/scripts/dev-harness/player-scenario.sh")
+ps_until_eq=$(awk '/^until_eq\(\) \{$/ { on = 1 } on { print } on && /^\}$/ { exit }' "$ROOT/scripts/dev-harness/player-scenario.sh")
+ps_p8() {   # ps_p8 <reads before the second shell answers> -> "pass= fail= reads= waited="
+  local out
+  out=$( P=0; F=0; READS=0; SLEPT=0; READY=$1; LOG=/dev/null; FIX=/nonexistent
+    RUN=true
+    is() { if [[ $2 == "$3" ]]; then P=$((P+1)); else F=$((F+1)); fi; }
+    sleep() { SLEPT=$((SLEPT+1)); }
+    player_count() { echo 1; }; windows_named() { echo 1; }
+    # np2 runs inside $( ), so its count lives in a file.
+    : >"$TMP/p8.reads"
+    np2() { echo r >>"$TMP/p8.reads"; if (( $(wc -l <"$TMP/p8.reads") > READY )); then echo "t:live2"; else echo NOFIELD; fi; }
+    [[ $(head -n 1 <<<"$ps_p8_block") == 'echo "== P8 '* && $(wc -l <<<"$ps_p8_block") -lt 20 && $(head -n 1 <<<"$ps_until_eq") == 'until_eq() {' ]] \
+      || { echo "player-scenario.sh's P8 block was not extracted whole"; exit 0; }
+    eval "$ps_until_eq"
+    eval "$ps_p8_block" >/dev/null
+    printf 'pass=%s fail=%s reads=%s\n' "$P" "$F" "$(wc -l <"$TMP/p8.reads")" )
+  printf '%s\n' "${out##*$'\n'}"
+}
+ck "player-scenario's P8 block and until_eq are extracted whole" \
+   '[[ $(head -n 1 <<<"$ps_p8_block") == "echo \"== P8 "* && $(tail -n 1 <<<"$ps_p8_block") == "is \"P8 the second shell leaving"* && $(wc -l <<<"$ps_p8_block") -lt 20 && $(tail -n 1 <<<"$ps_until_eq") == "}" ]]'
+is "P8 with the second shell answering at once: four passes, read twice" \
+   "$(ps_p8 0)" "pass=4 fail=0 reads=2"
+is "P8 with the second shell answering at its 61st read: waited for, four passes" \
+   "$(ps_p8 60)" "pass=4 fail=0 reads=62"
+is "P8 with a second shell that never answers: the wait ends at its bound and the check FAILs" \
+   "$(ps_p8 100000)" "pass=3 fail=1 reads=201"
+
 # ======== qa_key: the window-inactive refusal is a SKIP only where opted in
 
 section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
@@ -4703,7 +4737,11 @@ is "a start whose shell writes no pid fails, ends its gdb and what gdb started, 
 # 850 -> 856 on 2026-11-27 (F-HARNESS-59, the daily run): m3's H6 chain
 # driven over stubs, the IPC fallback behind a refused H6b included. Red on
 # fbeb5b8's m3-scenario.sh (2 of 6), and on four mutants of the fallback.
-EXPECTED=856
+# 856 -> 860 on 2026-11-27 (F-HARNESS-83, the daily run): player-scenario's
+# P8 block over stubs, the second shell answering late. Red on 6a398e0's
+# scenario (3 of 4), and on three mutants (no wait; a bound of 2 s; a miss
+# that ends the scenario).
+EXPECTED=860
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

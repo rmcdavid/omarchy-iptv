@@ -30438,3 +30438,33 @@ the other, once) and is repaired the same way (rule 15).
 
 Not asked: a ratio between 0.44 and 0.5 on a slower machine. The lever, if
 one is ever needed, is the round count, not the bound.
+
+## F-HARNESS-83: P8 waits for the second shell (the nightly run, 2026-11-27)
+
+player-scenario's P8 starts a second shell on the same runtime folder and
+read it after a fixed `sleep 4`; at load 6.8 it had not answered and the
+check read NOFIELD (rc-p2a, 2026-10-31). It now waits for the second shell
+to name the channel, for at most 20 s and never fatally, as P4 and P5 wait,
+then one more second, so that a player or a window the second shell
+wrongly started has time to show before the two counts are read.
+
+### Checks
+
+Four in `scripts/qa-lib-test.sh` (856 -> 860): P8's own text, from its
+banner to the check after the second shell leaves, and the scenario's own
+`until_eq`, over stubs. The second shell answers NOFIELD for its first N
+reads; `sleep` only counts.
+
+- extracted whole;
+- answering at once: four passes, two reads (the wait's and the check's);
+- answering at its 61st read: four passes, 62 reads;
+- never answering: three passes and one FAIL after 201 reads, the bound.
+
+Red first: on 6a398e0's player-scenario.sh three of the four fail (one
+read each; the late shell is the false FAIL). Three mutants, each red: no
+wait (3 checks), a bound of 2 s (2), a miss that ends the scenario (1).
+
+Not run: player-scenario itself. Searched (rule 15) the scenario for other
+fixed sleeps followed by a read of a second shell: P8's `sleep 2` after
+`shell-stop` is followed by a count that must NOT change, where a longer
+wait is the stricter reading, and stays.
