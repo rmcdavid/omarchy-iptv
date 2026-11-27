@@ -3735,4 +3735,76 @@ TestCase {
             ["string", true, true, "model/build.mjs", [], "", "restart", "cache", "[\"Service-pip.js\"]", "[\"__proto__\"]",
              "", "cache", "restart"])
   }
+
+  // D-HOST-15 (P2): the bar config as a FRESH PluginShellApi carries it, on
+  // V4's own wrappers. The host makes that object with
+  // `pluginShellApiComponent.createObject(null, { ..., barConfig:
+  // shell.publicBarConfig() })` (shell.qml 633-638) over a QtObject whose
+  // `property var barConfig: ({})` is this one's (services/PluginShellApi.qml
+  // 17), and until its next syncPluginApis assigns a parsed copy from script
+  // (904) the service reads Qt's wrappers back: each section a V4Sequence
+  // that Array.isArray refuses (measured in the host's own shell.qml by
+  // lane-dh15m, 2026-11-27). The premise is asserted here too, so a Qt that
+  // stops making the sequence turns this red and the reading is re-measured.
+  // The reading: the entry is found and copied, its settings read, the gate
+  // lets an own write through, and the write the funnel composes over it
+  // (retiredInputsToKeep, entryWith) carries every field; after the script
+  // assignment the Array reads the same. Red on 27e2a84 (the entry read as
+  // absent, the defaults, the write refused). What the wrapped entry itself
+  // answers to the readings the copy spares it is logged, not asserted. Its
+  // fields come back in the map's own order, the keys sorted (a QVariantMap),
+  // not shell.json's, so a write composed in the window stores the entry's
+  // keys sorted: the host's dirty check then reads a change, once.
+  Component {
+    id: freshShellApi
+    QtObject { property var barConfig: ({}) }
+  }
+  function test_freshApiBarConfigInV4() {
+    var pid = "io.github.rmcdavid.iptv"
+    var sections = ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+    var plain = { layout: { left: [], centerBegin: [], center: [{ id: "omarchy.clock" }], centerEnd: [],
+                            right: [{ id: "omarchy.tray" }, { id: pid, playlistUrl: "http://a.example.test/list.m3u", maxRecents: 25, refreshMinutes: 120, user_note: "kept" }] } }
+    var api = freshShellApi.createObject(null, { barConfig: JSON.parse(JSON.stringify(plain)) })
+    var right = api.barConfig.layout.right
+    var premise = [Array.isArray(right), Object.prototype.toString.call(right), right.length, Object.prototype.toString.call(right[1])]
+    var wrapped = right[1]
+    var asks = []
+    try { asks.push("hasOwnProperty(id)=" + Object.prototype.hasOwnProperty.call(wrapped, "id")) } catch (e1) { asks.push("hasOwnProperty threw " + e1) }
+    try { asks.push("Object.keys=" + Object.keys(wrapped).sort().join(",")) } catch (e2) { asks.push("Object.keys threw " + e2) }
+    try { asks.push("absent key=" + typeof wrapped.pipCorner) } catch (e3) { asks.push("absent key threw " + e3) }
+    try { asks.push("in=" + ("id" in wrapped)) } catch (e4) { asks.push("in threw " + e4) }
+    try { asks.push("forEach=" + typeof right.forEach) } catch (e5) { asks.push("forEach threw " + e5) }
+    try { asks.push("past the end=" + typeof right[2]) } catch (e6) { asks.push("past the end threw " + e6) }
+    console.log("D-HOST-15: the wrapped entry and its sequence in V4: " + asks.join("; "))
+    var found = Model.findBarEntry(api.barConfig, pid, sections)
+    var s = Model.settingsFrom(found)
+    var read = [Object.getPrototypeOf(found) === Object.prototype, Object.keys(found).sort().join(","), s.playlistUrl, s.maxRecents, s.refreshMinutes,
+                found.user_note, Model.barEntryWritable(api.barConfig, pid, sections)]
+    var entry = Model.entryWith(found, { sourceKey: "0123abcd" }, { keep: Model.retiredInputsToKeep(found, false, null) })
+    var composed = JSON.stringify(entry)
+    api.barConfig = JSON.parse(JSON.stringify(plain))
+    var closed = [Array.isArray(api.barConfig.layout.right), Model.settingsFrom(Model.findBarEntry(api.barConfig, pid, sections)).maxRecents,
+                  Model.barEntryWritable(api.barConfig, pid, sections)]
+    api.destroy()
+    // A shell.json entry holding a `__proto__` key, parsed as the host's
+    // publicBarConfig parses it: whatever V4's JSON.parse and the map make of
+    // it (logged), the copy keeps Object.prototype as its prototype, because
+    // Object.prototype holds the `__proto__` accessor and the copy skips
+    // every key it holds.
+    var oddText = "{\"layout\":{\"right\":[{\"id\":\"" + pid + "\",\"__proto__\":{\"polluted\":true},\"maxRecents\":25}]}}"
+    var odd = freshShellApi.createObject(null, { barConfig: JSON.parse(oddText) })
+    var oddFound = Model.findBarEntry(odd.barConfig, pid, sections)
+    var copied = [Object.prototype.hasOwnProperty.call(Object.prototype, "__proto__"), Object.getPrototypeOf(oddFound) === Object.prototype, oddFound.maxRecents]
+    odd.barConfig = JSON.parse(oddText)
+    var oddArray = Model.findBarEntry(odd.barConfig, pid, sections)
+    console.log("D-HOST-15: an entry holding __proto__ in V4: the copy's own keys " + Object.keys(oddFound).sort().join(",") + "; the Array path's own keys "
+                + Object.keys(oddArray).sort().join(",") + ", its prototype Object.prototype " + (Object.getPrototypeOf(oddArray) === Object.prototype) + ", polluted reads " + oddArray.polluted)
+    odd.destroy()
+    compare(copied, [true, true, 25])
+    compare([premise, read, composed, closed],
+            [[false, "[object V4Sequence]", 2, "[object V4ReferenceObject]"],
+             [true, "id,maxRecents,playlistUrl,refreshMinutes,user_note", "http://a.example.test/list.m3u", 25, 120, "kept", true],
+             "{\"id\":\"io.github.rmcdavid.iptv\",\"maxRecents\":25,\"playlistUrl\":\"http://a.example.test/list.m3u\",\"refreshMinutes\":120,\"user_note\":\"kept\",\"sourceKey\":\"0123abcd\"}",
+             [true, 25, true]])
+  }
 }

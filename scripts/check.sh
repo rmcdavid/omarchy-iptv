@@ -352,7 +352,13 @@ fail=0
 # 2026-11-25, lane-l3b (D-REL-16): 112 -> 113, test_buildStampsInV4 -- the
 # aggregator's `export var` and the stamps' reading in V4, red on the parent
 # model (modelBuildStamps is not a function).
-QML_SPEC_MIN=${QML_SPEC_MIN:-113}
+# 2026-11-27, lane-dh15fix (D-HOST-15): 113 -> 114,
+# test_freshApiBarConfigInV4 -- a bar config set through createObject's
+# property map, as the host sets a fresh API's, read by the walkers on V4's
+# own V4Sequence and V4ReferenceObject wrappers; red on 27e2a84 (the entry
+# read as absent, the defaults, the write refused) and on the model mutant
+# that ignores the sequence again.
+QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -847,7 +853,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-113}
 # cacheFolder and serviceMissingText bindings compiled from Guide.qml and
 # run against a fake Quickshell.env (red on a guide that hands the composer
 # {}, and on three more mutants); the suite runs 4175.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4175}
+# 2026-11-27, lane-dh15fix (D-HOST-15): 4175 -> 4188 -- the walkers over a
+# fresh API's bar config (a V4Sequence double that refuses all it was not
+# measured to answer, the doubles' own check, every host section, the Array
+# form beside it, absent, eleven shapes refused, the host's list in either
+# form, the copy's prototype) and the service's state load in that form; 10
+# of the 13 red on 27e2a84, all 13 green, each of 12 one-decision mutants
+# red; the suite runs 4188.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4188}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

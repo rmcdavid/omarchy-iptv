@@ -625,30 +625,92 @@ function footerWarning(playlistWarnings, epgWarnings) {
 // a baseline model cannot blind it.
 var BAR_SECTIONS = ["left", "center", "right"]
 
+// D-HOST-15 (P2). The list a section is read from: a real Array, or the
+// SEQUENCE Qt makes of one that crossed createObject's property map --
+// nothing else. The host hands the service a PluginShellApi it makes fresh
+// at every creation (ensureService, shell.qml 958, through
+// createScopedPluginShell, 602-638: fresh in 238 of 238 creations on every
+// path the host takes, lane-dh15m in the host's own shell.qml, omarchy
+// 4.5.0-3, Qt 6.12.0, 2026-11-27), whose barConfig is set in that map. Until
+// the host's next syncPluginApis assigns it a parsed copy from script (904),
+// the service reads it back as Qt's wrappers: the barConfig and its layout a
+// V4ReferenceObject, every section a V4Sequence, every entry in one a
+// V4ReferenceObject. Array.isArray refuses a V4Sequence, so in that window
+// both walkers below read every section as absent -- the service took its
+// default settings, a state load trimmed the recents to the default 10, a
+// first reconcile set the migration marker over an entry read as empty, and
+// an own write was refused as "no writable bar entry".
+//
+// The sequence is read only through what the measurement saw it answer:
+// Object's toString naming it, and an index below its length. Not asList
+// (model/text.mjs), which takes any object with a numeric length: an object
+// that merely has one is no section, and the host's own readers take an
+// Array and nothing else (Util.qml's normalizeLayoutSection). A tag that a
+// later Qt renames reads as absent, which is what every Qt before this
+// reading did. -> the list to walk, or null.
+function hostList(value) {
+  if (Array.isArray(value)) return value
+  if (value === null || typeof value !== "object") return null
+  if (Object.prototype.toString.call(value) !== "[object V4Sequence]") return null
+  var n = value.length
+  return typeof n === "number" && isFinite(n) && n >= 0 && Math.floor(n) === n ? value : null
+}
+
+// D-HOST-15. An entry found in a sequence is a V4ReferenceObject, and it is
+// COPIED here, field by field, through the two things the host's own wrapper
+// was seen to answer: for...in, which listed exactly the entry's fields, and
+// a read of each. So nothing downstream asks the wrapper anything more --
+// hasOwnProperty (retiredInputsToKeep, entryWith), a key it lacks
+// (settingOf), a write -- and every caller gets a plain object, as it does
+// from the Array the host assigns later. (The same wrapper made in
+// qmltestrunner answered those too; the QML spec logs it.) Own keys only, as
+// entryWith reads its source, without hasOwnProperty: a key Object.prototype
+// itself holds is skipped -- one a polluted prototype lent every object
+// (D-SG-3), `constructor`, and `__proto__`, whose accessor it holds in V8 and
+// in V4 alike (the spec asserts it), so a key of that name cannot set the
+// copy's prototype. The fields come in the wrapper's order, a QVariantMap's,
+// sorted by key. A value is copied as it reads; the plugin's settings are
+// strings, numbers and booleans, and a nested list or object (a hand-edited
+// shell.json) is not what the measurement read.
+function hostEntryCopy(entry) {
+  var out = {}
+  for (var k in entry) {
+    if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue
+    out[k] = entry[k]
+  }
+  return out
+}
+
 // The sections both walkers walk: the host's list when it hands one (its
 // string names, in its order), else BAR_SECTIONS, 4.0.x's. One function, so the two
 // walkers cannot be handed two different lists by their callers' defaults.
+// D-HOST-15: the list is read as the walkers read a section (hostList), so
+// the host's list reaches them in either form.
 function barSectionList(sections) {
-  if (!Array.isArray(sections)) return BAR_SECTIONS
+  var list = hostList(sections)
+  if (list === null) return BAR_SECTIONS
   var out = []
-  for (var i = 0; i < sections.length; i++) if (typeof sections[i] === "string") out.push(sections[i])
+  for (var i = 0; i < list.length; i++) if (typeof list[i] === "string") out.push(list[i])
   return out
 }
 
 // Our inline settings live on the bar layout entry (shell.json bar.layout.*).
 // Returns the entry object or {} so callers can read keys with fallbacks.
 // `sections` is the host's Util.barSections (barSectionList above).
+// D-HOST-15: a section in the sequence form is walked (hostList), and the
+// entry found in one is handed back as a plain copy (hostEntryCopy).
 function findBarEntry(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return {}
   sections = barSectionList(sections)
   for (var s = 0; s < sections.length; s++) {
-    var entries = barConfig.layout[sections[s]]
-    if (!Array.isArray(entries)) continue
+    var entries = hostList(barConfig.layout[sections[s]])
+    if (entries === null) continue
+    var wrapped = !Array.isArray(entries)
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i]
       if (typeof entry === "string" && entry === id) return { id: id }
-      if (entry && typeof entry === "object" && str(entry.id) === id) return entry
+      if (entry && typeof entry === "object" && str(entry.id) === id) return wrapped ? hostEntryCopy(entry) : entry
     }
   }
   return {}
@@ -1046,13 +1108,17 @@ function ownedEntryPatch(effective, overrides) {
 // which is success (the host already stores what we asked for).
 // D-HOST-11: over the same `sections` as findBarEntry, from the same
 // barSectionList; a caller passes both walkers the one list it holds.
+// D-HOST-15: and over the same reading of a section (hostList), so an entry
+// the service reads from a fresh API's sequence is one it may write; the
+// write goes to the host's updateEntryInline, which walks the host's own
+// config, never this object.
 function barEntryWritable(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return false
   sections = barSectionList(sections)
   for (var s = 0; s < sections.length; s++) {
-    var entries = barConfig.layout[sections[s]]
-    if (!Array.isArray(entries)) continue
+    var entries = hostList(barConfig.layout[sections[s]])
+    if (entries === null) continue
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i]
       if (entry && typeof entry === "object" && str(entry.id) === id) return true
@@ -1280,11 +1346,11 @@ export {
   playerVerbKind, playerVerbReason, statusReason, lastErrorAfterStatus,
   statusHost, statusCode, statusHealthy, statusWarnings, WARNING_PREFIX,
   warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
-  BAR_SECTIONS, barSectionList, findBarEntry, settingOf, boolSetting,
-  clampInt, clampSetting, settingsFrom, entryInputText, entryInputForm,
-  sameEntryInput, ownWriteInForce, settingsWithOwnWrite, ownWriteOf,
-  OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen,
-  entryInputLast, entryInputsSeenAfter, entryInputNotice, ownedEntryPatch,
-  barEntryWritable, entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  BAR_SECTIONS, hostList, hostEntryCopy, barSectionList, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 }
