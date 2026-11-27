@@ -1,0 +1,209 @@
+
+  // ===================================================================
+  // RIG (barconfig-window, D-HOST-15), not the host's: inserted by
+  // ../codebehind-reload/make-root.py before the host shell.qml's closing
+  // brace (its line 1939). It READS the host's state and logs it; it changes
+  // nothing the host does, but for rigHoldSync, which only --hold-sync's
+  // inserted line reads (the red control).
+  //
+  // Every line it writes starts `RIG-W <ms> <seq> `, the wall clock the
+  // service's own log lines (service-log.patch, `IPTV-LOG <ms> `) and
+  // run.sh read, and a sequence number that orders lines written in the same
+  // millisecond.
+  readonly property string rigwId: "io.github.rmcdavid.iptv"
+  property bool rigHoldSync: Quickshell.env("RIGW_HOLD_SYNC") === "1"
+  property int rigwSeq: 0
+  property string rigwApiSeen: "none"
+  property string rigwServiceSeen: "none"
+  property string rigwBarApiSeen: "none"
+
+  function rigNote(what) { shell.rigw(what) }
+
+  function rigw(what) {
+    shell.rigwSeq = shell.rigwSeq + 1
+    console.log("RIG-W " + Date.now() + " " + shell.rigwSeq + " " + what)
+  }
+
+  // Array.isArray over each section of a barConfig's layout, as the host's
+  // side reads it: `right=seq(1)` is a section that is not an Array but has
+  // a length, `right=array(1)` one that is.
+  function rigwShape(cfg) {
+    var out = []
+    try {
+      if (cfg === null || cfg === undefined) return "none"
+      var layout = cfg.layout
+      if (layout === null || layout === undefined) return "nolayout"
+      var sections = Commons.Util.barSections
+      for (var i = 0; i < sections.length; i++) {
+        var a = layout[sections[i]]
+        var kind = a === undefined ? "undef" : (Array.isArray(a) ? "array" : (a === null ? "null" : "seq"))
+        out.push(sections[i] + "=" + kind + "(" + (a && a.length !== undefined ? a.length : "-") + ")")
+      }
+    } catch (e) { out.push("threw:" + e) }
+    return out.join(",")
+  }
+
+  // --probe's line above shell.qml 958 and 1005: the host's own API cache as
+  // createScopedPluginShell (602-609) is about to read it for this key, and
+  // so whether the call that follows returns the object it holds ("cached")
+  // or makes a new one with barConfig in createObject's property map
+  // ("fresh"). The profile is computed with the host's own function and the
+  // arguments pluginShellFor (764-769) passes.
+  function rigwBeforeApi(key, manifest, where) {
+    var k = String(key)
+    if (k !== shell.rigwId) return
+    var cached = shell._pluginShellApis[k]
+    var descriptor = shell._pluginShellApiDescriptors[k]
+    var profile = shell.pluginShellCapabilityProfile(manifest, true, shell.pluginHasBarCapabilities(manifest))
+    var hit = !!(cached && descriptor && descriptor.pluginId === k && descriptor.profile === profile)
+    shell.rigw("beforeApi " + where + " " + (hit ? "cached" : "fresh") + " held=" + (cached ? String(cached) : "none")
+               + " heldShape=" + (cached ? shell.rigwShape(cached.barConfig) : "none")
+               + " bar=" + (shell.bar ? "yes" : "no")
+               + " barApi=" + (shell.bar && shell.bar.pluginBarApis && shell.bar.pluginBarApis[k] ? "yes" : "no")
+               + " panel=" + (shell.panelLoaders[k] ? "yes" : "no"))
+  }
+
+  Connections {
+    target: shell
+    // Every change of the host's API cache for this plugin's id, with the
+    // stack that made it: who asked first is the frame below
+    // createScopedPluginShell (ensureService's finalize, the bar's
+    // pluginBarApiFor, a panel Loader's onLoaded).
+    function on_PluginShellApisChanged() {
+      var api = shell._pluginShellApis[shell.rigwId]
+      var s = api ? String(api) : "none"
+      if (s === shell.rigwApiSeen) return
+      shell.rigwApiSeen = s
+      shell.rigw("api " + s + " service=" + (shell._services[shell.rigwId] ? "yes" : "no")
+                 + " shape=" + shell.rigwShape(api ? api.barConfig : null))
+      if (api) console.trace()
+    }
+    function on_ServicesChanged() {
+      var svc = shell._services[shell.rigwId]
+      var s = svc ? String(svc) : "none"
+      if (s === shell.rigwServiceSeen) return
+      shell.rigwServiceSeen = s
+      var api = shell._pluginShellApis[shell.rigwId]
+      shell.rigw("service " + s + (svc ? " shell=" + String(svc.shell) + " sameAsCache=" + (svc.shell === api)
+                                   + " shape=" + shell.rigwShape(svc.shell ? svc.shell.barConfig : null) : ""))
+    }
+    function onBarChanged() { shell.rigw("bar " + String(shell.bar)) }
+    function onPanelLoadersChanged() {
+      var l = shell.panelLoaders[shell.rigwId]
+      shell.rigw("panel " + (l ? "registered" : "none"))
+    }
+    function onPluginReloadingChanged() { shell.rigw("pluginReloading " + shell.pluginReloading) }
+  }
+
+  // syncPluginApis' assignment to THIS plugin's API (904): the object the
+  // cache holds now, whatever it is.
+  Connections {
+    target: shell._pluginShellApis[shell.rigwId] || null
+    ignoreUnknownSignals: true
+    function onBarConfigChanged() {
+      var api = shell._pluginShellApis[shell.rigwId]
+      shell.rigw("apiBarConfig " + (api ? String(api) : "none") + " shape=" + shell.rigwShape(api ? api.barConfig : null)
+                 + " service=" + (shell._services[shell.rigwId] ? "yes" : "no"))
+    }
+  }
+
+  // The two signals syncPluginApis answers (1081-1092). The rig's handlers
+  // are connected after the host's (this block is the root's last), so each
+  // line follows the host's syncPluginApis for the same emission.
+  Connections {
+    target: shell.pluginRegistry
+    function onPluginsChanged() {
+      shell.rigw("pluginsChanged installed=" + (shell.pluginRegistry.installedPlugins[shell.rigwId] ? "yes" : "no")
+                 + " enabled=" + shell.pluginRegistry.isEnabled(shell.rigwId) + " scanning=" + shell.pluginRegistry.scanning)
+    }
+    function onScanFinished() { shell.rigw("scanFinished") }
+    function onLocalPluginChanged(pluginId) { shell.rigw("localPluginChanged " + pluginId) }
+  }
+  Connections {
+    target: shell.barWidgetRegistry
+    function onChanged() {
+      shell.rigw("widgetRegistryChanged revision=" + shell.barWidgetRegistry.revision
+                 + " ours=" + (shell.barWidgetRegistry.widgets[shell.rigwId] ? "yes" : "no"))
+    }
+  }
+  // The bar's own API for this plugin's widget (Bar.qml 349-397): made the
+  // first time its widget host injects the widget, after asking the host
+  // for the widget's shell (pluginShellForId).
+  Connections {
+    target: shell.bar
+    ignoreUnknownSignals: true
+    function onPluginBarApisChanged() {
+      var b = shell.bar && shell.bar.pluginBarApis ? shell.bar.pluginBarApis[shell.rigwId] : null
+      var s = b ? String(b) + " shell=" + String(b.shell) : "none"
+      if (s === shell.rigwBarApiSeen) return
+      shell.rigwBarApiSeen = s
+      shell.rigw("barApi " + s)
+    }
+  }
+
+  FileView {
+    id: rigwPidFile
+    path: Quickshell.env("RIG_PID_FILE") || ""
+    printErrors: false
+  }
+  Item {
+    Component.onCompleted: {
+      if (rigwPidFile.path !== "") rigwPidFile.setText(String(Quickshell.processId) + "\n")
+      shell.rigw("rig up pid=" + Quickshell.processId + " holdSync=" + shell.rigHoldSync)
+    }
+  }
+
+  IpcHandler {
+    target: "rigw"
+
+    // What the service holds now, read off it.
+    function state(): string {
+      var out = ({})
+      var s = shell.serviceFor(shell.rigwId)
+      out.service = s ? String(s) : "none"
+      var api = shell._pluginShellApis[shell.rigwId]
+      out.api = api ? String(api) : "none"
+      out.installed = shell.pluginRegistry.installedPlugins[shell.rigwId] ? true : false
+      out.enabled = shell.pluginRegistry.isEnabled(shell.rigwId)
+      out.reloading = shell.pluginReloading
+      out.scanning = shell.pluginRegistry.scanning
+      out.bar = shell.bar ? String(shell.bar) : "none"
+      out.barApi = shell.bar && shell.bar.pluginBarApis && shell.bar.pluginBarApis[shell.rigwId] ? true : false
+      out.holdSync = shell.rigHoldSync
+      if (s) {
+        try {
+          out.sameAsCache = s.shell === api
+          out.shape = shell.rigwShape(s.shell ? s.shell.barConfig : null)
+          out.maxRecents = s.maxRecents
+          out.hostMaxRecents = s.hostSettings ? s.hostSettings.maxRecents : null
+          out.playlistSet = String(s.settings.playlistUrl || "") !== ""
+          out.stateLoaded = s.stateLoaded === true
+          out.recents = s.userState && s.userState.recents ? s.userState.recents.length : null
+          out.marker = s.userState ? s.userState.entryMigrated === true : null
+          out.sources = s.userState && s.userState.sources ? s.userState.sources.length : null
+          out.activeKeySet = s.userState ? String(s.userState.activeKey || "") !== "" : null
+          out.landedMarker = s.landedState ? s.landedState.entryMigrated === true : null
+          out.landedRecents = s.landedState && s.landedState.recents ? s.landedState.recents.length : null
+          out.savesInFlight = s.stateSavesInFlight
+          out.savePending = s.stateSavePending === true
+          out.channels = s.channels ? s.channels.length : null
+          out.entryReports = s.entryInputReports ? s.entryInputReports.length : null
+        } catch (e) { out.threw = String(e) }
+      }
+      return JSON.stringify(out)
+    }
+
+    // The red control's release: the held syncPluginApis runs once, as the
+    // host's next registry or widget change would run it.
+    function release(): string {
+      shell.rigHoldSync = false
+      shell.rigw("release")
+      shell.syncPluginApis()
+      return "ok"
+    }
+
+    function watcherPid(): string {
+      return String(shell.pluginRegistry.localPluginWatcher.processId || "")
+    }
+  }
+  // ================================ end RIG ===========================

@@ -1507,7 +1507,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4175}
 # main from before the stamps), the CLI's default ref refs/heads/main, and
 # every refusal case naming its message; red first and on four one-decision
 # mutants (QA-RESULTS "D-REL-16: the three rechecks of 1c64c77").
-PY_TESTS_MIN=${PY_TESTS_MIN:-3135}
+# 2026-11-27, lane-dh15m (D-HOST-15): 3135 -> 3143 --
+# tests/test_barconfig_window.py, the caged barConfig readout
+# (scripts/dev-harness/spikes/barconfig-window/analyze.py) over logs in the
+# shapes the runs printed; red first (8 run, 1 failure, 2 errors) and on nine
+# one-decision mutants (QA-RESULTS "D-HOST-15: the barConfig window on the
+# host's own order").
+PY_TESTS_MIN=${PY_TESTS_MIN:-3143}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
