@@ -233,7 +233,18 @@ else
   [[ $h6a == '["Religious"]' ]] && pass "H6a a real x through the catcher hides" || fail "H6a" "$h6a"
   key_sent x; kr=$?; sleep 0.5
   h6b=$(gf 'g["hiddenGroups"]')
-  if (( kr == 1 )); then skip "H6b and a second real x unhides" "$QA_KEY_SKIP_REASON"
+  if (( kr == 1 )); then
+    skip "H6b and a second real x unhides" "$QA_KEY_SKIP_REASON"
+    # F-HARNESS-59: H6a's x was sent and this one refused, so Religious is
+    # still hidden, persisted in the scratch state, where H6b would have
+    # left it shown: P1a would then read [Religious, News] and P1b one row,
+    # two false FAILs. Unhidden through the IPC door H5b uses, and said,
+    # as T5's trackClose fallback is. Only over a hide H6a observed.
+    if [[ $h6a == '["Religious"]' ]]; then
+      ipc setScope "g:Religious" >/dev/null; sleep 0.2
+      ipc remove >/dev/null; sleep 0.4
+      echo "   H6b skipped: Religious unhidden through ipc setScope g:Religious and ipc remove, where the second x would have left it (hiddenGroups $(gf 'g["hiddenGroups"]'))"
+    fi
   elif [[ $h6a != '["Religious"]' ]]; then fail "H6b" "nothing to unhide: H6a left $h6a, and [] after the second x would be the state before the first"
   else [[ $h6b == '[]' ]] && pass "H6b and a second real x unhides" || fail "H6b" "$h6b"; fi
 fi

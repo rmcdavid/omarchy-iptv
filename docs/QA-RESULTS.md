@@ -30358,3 +30358,41 @@ Searched (rule 15) for other single reads of `windowActive` or `focusState`
 taken straight after an open: clip-scenario's `focus_held` is already
 polled by its caller, m3's `shot` goes through this guard, and `type`'s
 inner keys do too. No other reader found in `scripts/`.
+
+## F-HARNESS-59: m3's H6 chain gets its fallback (the nightly run, 2026-11-27)
+
+m3's H6a sends a real `x` that hides Religious and H6b a second that
+unhides it. With H6a's sent and H6b's alone refused by the focus guard,
+Religious stayed hidden, saved in the scratch state, and P1 began from it:
+P1a would read `[Religious, News]` and P1b one row. Seen in no run.
+
+After a refused H6b, and only when H6a read `["Religious"]`, the scenario
+now calls `ipc setScope g:Religious` and `ipc remove` (H5a's and H5b's own
+calls) and prints one line saying so, as T5's `trackClose` fallback does.
+When H6a left anything else it sends nothing: `remove` on a group that is
+shown would hide it.
+
+### Checks
+
+Six in `scripts/qa-lib-test.sh` (850 -> 856). The H6 block's own text, from
+its comment to the `fi` that closes the chain, runs over stubs: `gf`
+answers the hidden list, `key_sent` answers each call from a list, and
+`ipc` toggles the group only when the scope is on it and records each call.
+
+- extracted whole;
+- both keys sent: two passes, no IPC call;
+- H6b alone refused: one pass, one skip, hidden `[]`, IPC
+  `setScope g:Religious,remove`;
+- the same with the guide's scope elsewhere: the same answer;
+- H6a refused: two skips, one key, no IPC call;
+- H6a sent and hiding nothing, H6b refused: one fail, one skip, no IPC call.
+
+Red first: on fbeb5b8's m3-scenario.sh the third and fourth read
+`hidden=["Religious"] ipc=`. Four mutants of the fallback, each red: no
+setScope (2 checks), no remove (2), the fallback whatever H6a left (1),
+`setScope all` (2).
+
+Not run: m3 itself, caged or on the desk. Searched (rule 15) m3-scenario.sh
+for other keyed pairs whose second key undoes the first's saved state: T5
+has its fallback (F-HARNESS-54), and P1's undo is already `ipc remove`, not
+a key.

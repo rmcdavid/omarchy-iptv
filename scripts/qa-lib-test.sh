@@ -2718,6 +2718,59 @@ is "T5 with T5a refused: the rest unsent, the picker T4 left open closed by the 
 is "T5 with T5b refused: the picker T5a closed stays closed, nothing for the fallback" \
    "$(m3_t5 0 1)" "pass=1 fail=0 skip=3 closes=0 open=false keys=2"
 
+# F-HARNESS-59: m3's H6 chain, driven the same way. With H6a's x sent and
+# H6b's alone refused, Religious stayed hidden into P1, with no IPC door
+# behind it as T5 has trackClose. The block's own text (from the `# H6:`
+# comment to the `fi` at column 0 that closes it) runs over stubs: gf
+# answers the hidden list the keys and the IPC door change, key_sent answers
+# each call from a list, ipc records what it was asked. On fbeb5b8's
+# m3-scenario.sh the second case read "... hidden=[\"Religious\"] ipc=".
+m3_h6_block=$(awk '/^# H6: the real key/ { on = 1 } on { print } on && /^fi$/ { exit }' "$ROOT/scripts/dev-harness/m3-scenario.sh")
+m3_h6() {   # m3_h6 <does x hide: 1|0> <key_sent answers...> -> "pass= fail= skip= hidden= ipc= keys="
+  local out
+  out=$( PASS=0; FAIL=0; SKIP=0; QA_KEY_SKIP_REASON="refused ($QA_KEY_WINDOW_INACTIVE)"
+    WORKS=$1; shift
+    HID='[]' SCOPE=g:Religious KI=0 IPC=""; KEYS=("$@")
+    pass() { PASS=$((PASS+1)); }; fail() { FAIL=$((FAIL+1)); }; skip() { SKIP=$((SKIP+1)); }
+    sleep() { :; }
+    gf() { case $1 in 'g["hiddenGroups"]') echo "$HID" ;; *) echo NOSTATE ;; esac; }
+    toggle() { if [[ $HID == '[]' ]]; then HID='["Religious"]'; else HID='[]'; fi; }
+    key_sent() {
+      local rc=${KEYS[KI]:-0}; KI=$((KI+1))
+      (( rc == 0 )) || return "$rc"
+      [[ $* == x && $WORKS == 1 ]] && toggle
+      return 0
+    }
+    # The door is the guide's own: `remove` toggles the group the SCOPE is
+    # on, so a fallback that skips the setScope is seen when the scope moved.
+    ipc() {
+      IPC="$IPC${IPC:+,}$*"
+      case ${1-} in
+        setScope) SCOPE=$2 ;;
+        remove) [[ $SCOPE == g:Religious ]] && toggle ;;
+      esac
+      return 0
+    }
+    [[ $(head -n 1 <<<"$m3_h6_block") == '# H6: the real key'* && $(tail -n 1 <<<"$m3_h6_block") == fi && $(wc -l <<<"$m3_h6_block") -lt 40 ]] \
+      || { echo "m3-scenario.sh's H6 block was not extracted whole"; exit 0; }
+    [[ ${M3_H6_SCOPE-} ]] && SCOPE=$M3_H6_SCOPE
+    eval "$m3_h6_block" >/dev/null
+    printf 'pass=%s fail=%s skip=%s hidden=%s ipc=%s keys=%s\n' "$PASS" "$FAIL" "$SKIP" "$HID" "$IPC" "$KI" )
+  printf '%s\n' "${out##*$'\n'}"
+}
+ck "m3's H6 block is extracted whole: from its comment through the fi that closes the chain" \
+   '[[ $(head -n 1 <<<"$m3_h6_block") == "# H6: the real key"* && $(tail -n 1 <<<"$m3_h6_block") == "fi" && $m3_h6_block == *"H6b and a second real x unhides"* && $(wc -l <<<"$m3_h6_block") -lt 40 ]]'
+is "H6 with both keys sent: two passes, the IPC door not used" \
+   "$(m3_h6 1 0 0)" 'pass=2 fail=0 skip=0 hidden=[] ipc= keys=2'
+is "H6 with H6b alone refused: Religious is unhidden through the IPC door" \
+   "$(m3_h6 1 0 1)" 'pass=1 fail=0 skip=1 hidden=[] ipc=setScope g:Religious,remove keys=2'
+is "and the door is asked for the group by name, whatever scope the guide is on" \
+   "$(M3_H6_SCOPE=all m3_h6 1 0 1)" 'pass=1 fail=0 skip=1 hidden=[] ipc=setScope g:Religious,remove keys=2'
+is "H6 with H6a refused: nothing was hidden, so nothing is sent and nothing unhidden" \
+   "$(m3_h6 1 1)" 'pass=0 fail=0 skip=2 hidden=[] ipc= keys=1'
+is "H6a sent and hiding nothing, H6b refused: a FAIL and a SKIP, and no remove, which would HIDE the group" \
+   "$(m3_h6 0 0 1)" 'pass=0 fail=1 skip=1 hidden=[] ipc= keys=2'
+
 # ======== qa_key: the window-inactive refusal is a SKIP only where opted in
 
 section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
@@ -4647,7 +4700,10 @@ is "a start whose shell writes no pid fails, ends its gdb and what gdb started, 
 # asks again on the desk while the guide's window is not active yet, over a
 # stub qs that counts its calls. Six red on f2668e3's run.sh; seven mutants
 # of the fix each red.
-EXPECTED=850
+# 850 -> 856 on 2026-11-27 (F-HARNESS-59, the daily run): m3's H6 chain
+# driven over stubs, the IPC fallback behind a refused H6b included. Red on
+# fbeb5b8's m3-scenario.sh (2 of 6), and on four mutants of the fallback.
+EXPECTED=856
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
