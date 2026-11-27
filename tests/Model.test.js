@@ -27222,8 +27222,14 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // another such double, is its prototype: a read the wrapper lacks goes on
   // to it, and for...in walks it (protoForm below).
   const fieldsOf = new WeakMap()
+  // A wrapper with no `proto` answers its prototype as V4 answered a plain
+  // entry's (qmltestrunner on Qt 6.12.0, lane-dh15fix2's probe, `map:normal`):
+  // an object that is NOT Object.prototype, whose tag is [object Object] and
+  // which has no own name -- where this double first answered Object.prototype
+  // itself, kinder than V4 to a plainness test (the second code recheck).
   const refObject = (fields, absent, proto) => {
     let staged = null, listing = null, json = false
+    const standIn = Object.create(Object.prototype)
     const lends = key => proto !== undefined && own(fieldsOf.get(proto), key)
     const wrapper = new Proxy({}, {
       get(t, key) {
@@ -27243,7 +27249,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       },
       getPrototypeOf() {
         if (staged !== null) { listing = staged.length ? staged : null; staged = null }
-        return proto !== undefined ? proto : Object.prototype
+        return proto !== undefined ? proto : standIn
       },
       getOwnPropertyDescriptor(t, key) {
         if (listing !== null && listing[0] === key) {
@@ -27349,6 +27355,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
              protoForm: [Object.prototype.toString.call(w), w.id, w.polluted, wListed, JSON.stringify(w), Object.getPrototypeOf(w) === Object.prototype,
                          Object.keys(w).length, tries(() => w.pipCorner)],
              layout: [Object.prototype.toString.call(fresh({ layout: { right: [] } }).layout), fresh({ layout: { right: [] } }).layout.tray],
+             entryProto: (() => { const p = Object.getPrototypeOf(refObject({ id: PID })); return [p === Object.prototype, Object.prototype.toString.call(p), Object.getOwnPropertyNames(p).length] })(),
              refused: [tries(() => q.forEach(() => 0)), tries(() => q[1]), tries(() => q.indexOf(e)), tries(() => JSON.stringify(q)), tries(() => "length" in q),
                        tries(() => { q[0] = 1 }), tries(() => e.pipCorner), tries(() => Object.prototype.hasOwnProperty.call(e, "id")), tries(() => Object.keys(e)),
                        tries(() => { e.id = "x" }), tries(() => delete e.id), tries(() => "id" in e)] }
@@ -27356,6 +27363,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
        entry: ["object", false, "[object V4ReferenceObject]", PID, ["id:string", "maxRecents:number"], "{\"id\":\"" + PID + "\",\"maxRecents\":25}", "{\"id\":\"" + PID + "\",\"maxRecents\":25}"],
        protoForm: ["[object V4ReferenceObject]", PID, true, ["id:string", "polluted:boolean", "maxRecents:number"], "{}", false, 0, "refused"],
        layout: ["[object V4ReferenceObject]", undefined],
+       entryProto: [false, "[object Object]", 0],
        refused: ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused"] })
 
   // The window's reading: in every section of the installed host's list, the
@@ -27405,7 +27413,10 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // centerEnd is found through a sequence of the host's names and is absent
   // through an object with a length, where one in center is found; and a
   // sequence-tagged list of names whose length is negative falls back to the
-  // three too, rather than to no section at all.
+  // three too, rather than to no section at all; while an EMPTY sequence is
+  // the empty list an empty Array is -- no section walked, so an entry in
+  // center is absent and unwritable -- and not the fallback (the second
+  // recheck's surviving mutant, `n >= 0` read as `n > 0`).
   checkCall("D-HOST-15: the host's list of sections is read in the sequence form as the Array is, and anything else falls back to 4.0.x's three", () => {
     const at = (section, list) => read(M, layoutWith(section, Object.assign({ id: PID }, ENTRY)), list)
     const lengthy = {}
@@ -27415,8 +27426,9 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     Object.defineProperty(negative, Symbol.toStringTag, { value: "V4Sequence" })
     return [at("centerEnd", sequence(sections)).settings[1], at("tray", sequence(["dock", 7, "tray"])).settings[1], at("centerEnd", lengthy).id, at("center", lengthy).settings[1],
             read(M, fresh(layoutWith("centerEnd", Object.assign({ id: PID }, ENTRY))), sequence(sections)).settings[1],
-            at("center", negative).settings[1], at("centerEnd", negative).id]
-  }, [25, 25, "<none>", 25, 25, 25, "<none>"])
+            at("center", negative).settings[1], at("centerEnd", negative).id,
+            [at("center", sequence([])).id, at("center", sequence([])).writable], [at("center", []).id, at("center", []).writable]]
+  }, [25, 25, "<none>", 25, 25, 25, "<none>", ["<none>", false], ["<none>", false]])
   // The copy is the entry's own fields and nothing it could carry in. An
   // entry holding `__proto__`, in the form V4 makes of it (protoForm: no own
   // field, its fields and the nested object's on its prototype), is no entry

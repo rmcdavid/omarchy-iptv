@@ -1541,7 +1541,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4189}
 # only the handed object's assignment closes the window; red on 616061f's
 # analyzer (1 failure) and on the two mutants the code recheck found
 # surviving (1 failure each).
-PY_TESTS_MIN=${PY_TESTS_MIN:-3146}
+# 2026-11-27, the lead (D-HOST-15): 3146 -> 3147 -- a fresh object whose
+# sections already read as Arrays is closed at onShellChanged; red on the
+# second code recheck's surviving mutant (a shell closed only when it read
+# no section), 1 failure.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3147}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -144,6 +144,21 @@ class BarconfigWindowReadout(unittest.TestCase):
         self.assertFalse(v["defaults"])
         self.assertEqual(v["load"], "after")
 
+    def test_a_fresh_object_read_as_arrays_is_closed_at_once(self):
+        # A fresh object whose sections already read as Arrays at
+        # onShellChanged opens no window: it is closed there, so a marker
+        # saved later is after the close (the second code recheck's
+        # surviving mutant closed only a shell that read no section).
+        lines = [created(100), before(140, "fresh"), shell_changed(141, ARR, "[id,maxRecents,playlistUrl,refreshMinutes]"),
+                 published(143), state_load(151, ARR, 15, 25, "[id,maxRecents,playlistUrl,refreshMinutes]"),
+                 plan(152, "adopt", "true"), saved(1282)]
+        (v,), (rec,) = verdicts(self.mod, lines)
+        self.assertEqual(v["handed"], "fresh")
+        self.assertEqual(v["window"], "closed")
+        self.assertEqual((rec["closed"], rec["closedBy"]), (141, "fresh-array"))
+        self.assertEqual(v["markerSave"], "after-close")
+        self.assertEqual(v["load"], "after")
+
     def test_an_assignment_still_read_as_sequences_does_not_close_it(self):
         lines = ([created(100), before(140, "fresh")] + api(141) + [shell_changed(141, SEQ, "[]"), published(143)]
                  + assigned(148, SEQ.replace(" ", ",")) + [state_load(151, SEQ, 10, 10, "[]")] + assigned(300))

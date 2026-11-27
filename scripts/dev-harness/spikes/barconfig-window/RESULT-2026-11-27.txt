@@ -6625,3 +6625,781 @@ stand-in calls: 102
 crash journal after: 89
 barconfig-window: kept <work>
 # end 2026-11-27 12:50:32 CST rc 0 load 1.75 1.41 1.16 crash journal 89
+
+########################################################################
+
+D-HOST-15, the JSON copy in the same cage: the lead, 2026-11-27 (15:48 to
+16:03 CST), branch dh15 at 9d4154a (lane-dh15fix2's tip, whose shipped
+files are byte for byte ac04518's: the copy is JSON.parse(JSON.stringify
+(entry)), the id matched on it). The reading is docs/QA-RESULTS.md, the
+bracket "the lead: the second rechecks of 9d4154a settled, and the JSON
+copy in the host's own shell.qml" at the end of "D-HOST-15: the fix at the
+reading (lane-dh15fix, 2026-11-27)".
+
+THE RUNS. The rig as committed at 9d4154a, unchanged; each run under the
+heavy lock with `flock -o` and nice 10, one nested headless cage per run on
+../../private-bus.sh, every quickshell under gdb, through lane-dh15fix's
+wrapper with only its scratch folder changed, which printed the `# run`,
+`# start`, `# env`, `# arms`, `# crash journal` and `# end` lines:
+  RIGW_DEV=9d4154a RIGW_KEEP=1 <env> run.sh ARM...
+Every run is 9d4154a's ALLOWLIST export (export.py, commit fe58952c03f2, 47
+files). J-I-rr is F-I-rr's arms (rr, the reload rig's first install),
+J-R-hold F-R-hold's (bw, syncPluginApis held 6 s), J-C-bw-cold
+F-C-bw-cold's (bw, the host's order). Host: omarchy 4.5.0-3, quickshell
+0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3. Crash journal 89 before and after
+every shell of every run; gdb reported no signal. "window open" still says
+only that the service's shell carried sequences at onShellChanged;
+"defaults False" is the fix.
+
+WHAT IS PRINTED. As above: for each run the lines run.sh and the wrapper
+printed outside the starts, and for each start its `==` line and
+analyze.py's block, as committed, re-read over the files the start kept;
+the re-read equals what the runs printed, line for line (746 of 746), but
+for the one character outside ASCII (the notification icon in the stand-in
+log), written <U+F0026>. Paths as above: <work>, <scratch>, <worktree>.
+========================================================================
+# run J-I-rr
+# start 2026-11-27 15:48:55 CST rig at 9d4154a dev 9d4154a load 0.95 0.49 0.59
+# env RIGW_DEV=9d4154a RIGW_KEEP=1 
+# arms a-install-F b-install-F a-install-F b-install-F a-install-F b-install-F a-install-F b-install-F
+# crash journal 89
+barconfig-window: work <work>; export of 9d4154a337ffb6b921cc80d292b4a03c67a877e9; bar 0 widgets 0 patch 1 hold 0 cache cold load 0
+private-bus.sh: bus pid 2551539 at unix:path=<work>/bus/dbus-u7RZqb6VsR,guid=35c592e0db5092fe8974849d6b09fac7
+crash journal before: 89
+export: fe58952c03f2 of 9d4154a337ff (47 files)
+roots: make-root.py --probe
+stand-ins first on PATH: 563
+nested display wayland-0 (cage 2552331)
+== a-install-F.1: root a (pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 40 ms by pluginsChanged
+     at the first syncPluginApis after it (+40 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +5 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-install-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 2
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-install-F.1: root b (no pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 37 ms by pluginsChanged
+     at the first syncPluginApis after it (+37 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +4 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-install-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-install-F.2: root a (pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 46 ms by pluginsChanged
+     at the first syncPluginApis after it (+47 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +5 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-install-F.2 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-install-F.2: root b (no pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 46 ms by pluginsChanged
+     at the first syncPluginApis after it (+46 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +3 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-install-F.2 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-install-F.3: root a (pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 37 ms by pluginsChanged
+     at the first syncPluginApis after it (+37 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +5 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-install-F.3 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 2
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-install-F.3: root b (no pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 46 ms by pluginsChanged
+     at the first syncPluginApis after it (+47 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +4 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-install-F.3 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 2
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-install-F.4: root a (pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 38 ms by pluginsChanged
+     at the first syncPluginApis after it (+38 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +4 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-install-F.4 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 2
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-install-F.4: root b (no pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar no, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 42 ms by pluginsChanged
+     at the first syncPluginApis after it (+42 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +4 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-install-F.4 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+stand-in calls: 56
+        16 hyprctl -j getoption animations:enabled
+        16 hyprctl -j getoption decoration:rounding
+        16 hyprctl -j getoption general:gaps_out
+         8 hyprctl systeminfo
+crash journal after: 89
+barconfig-window: kept <work>
+# end 2026-11-27 15:51:47 CST rc 0 load 1.62 1.27 0.90 crash journal 89
+========================================================================
+# run J-R-hold
+# start 2026-11-27 15:51:47 CST rig at 9d4154a dev 9d4154a load 1.62 1.27 0.90
+# env RIGW_DEV=9d4154a RIGW_KEEP=1 RIGW_BAR=1 RIGW_WIDGETS=1 RIGW_HOLD=1
+# arms a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-M b-cold-M a-cold-N b-cold-N a-install-F b-install-F
+# crash journal 89
+barconfig-window: work <work>; export of 9d4154a337ffb6b921cc80d292b4a03c67a877e9; bar 1 widgets 1 patch 1 hold 1 cache cold load 0
+private-bus.sh: bus pid 2588411 at unix:path=<work>/bus/dbus-9Xi26At10H,guid=adb1a1bca0c764f9b771adc96b09fb73
+crash journal before: 89
+export: fe58952c03f2 of 9d4154a337ff (47 files)
+roots: make-root.py --probe --bar --widgets --hold-sync
+first-party manifests scanned: omarchy.active-window omarchy.agents omarchy.audio omarchy.bar omarchy.bluetooth omarchy.clock omarchy.dropbox omarchy.elsewhen omarchy.indicators omarchy.keyboard-layout omarchy.microphone omarchy.monitor omarchy.network omarchy.power omarchy.spacer omarchy.system-update omarchy.tailscale omarchy.tray omarchy.weather omarchy.workspaces
+stand-ins first on PATH: 563
+nested display wayland-0 (cage 2589215)
+== a-cold-F.1: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6561 ms by release
+     at the first syncPluginApis after it (+6562 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +102 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.1: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6554 ms by release
+     at the first syncPluginApis after it (+6554 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +101 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.2: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6529 ms by release
+     at the first syncPluginApis after it (+6530 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +83 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.2 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.2: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6547 ms by release
+     at the first syncPluginApis after it (+6547 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +103 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.2 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.3: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6552 ms by release
+     at the first syncPluginApis after it (+6552 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +102 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.3 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.3: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6594 ms by release
+     at the first syncPluginApis after it (+6594 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +130 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.3 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-M.1: root a (pragma), path cold, fixture M
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6534 ms by release
+     at the first syncPluginApis after it (+6535 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +74 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan migrate(adoptUrl=false,playlist=true); writes ; marker save none
+     says: playlistUrl is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.
+   verdict a-cold-M.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan migrate(adoptUrl=false,playlist=true), marker save none, playlistUrl refused True
+   state.json writes landed: 0
+   state.json at the end: recents 15, marker True, sources 0, activeKey unset
+   service at the end: maxRecents 25, recents 15, marker True, sources 0, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-M.1: root b (no pragma), path cold, fixture M
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6541 ms by release
+     at the first syncPluginApis after it (+6542 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +106 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan migrate(adoptUrl=false,playlist=true); writes ; marker save none
+     says: playlistUrl is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.
+   verdict b-cold-M.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan migrate(adoptUrl=false,playlist=true), marker save none, playlistUrl refused True
+   state.json writes landed: 0
+   state.json at the end: recents 15, marker True, sources 0, activeKey unset
+   service at the end: maxRecents 25, recents 15, marker True, sources 0, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-N.1: root a (pragma), path cold, fixture N
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,playlistUrl,refreshMinutes], entry maxRecents 10
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6535 ms by release
+     at the first syncPluginApis after it (+6536 ms): sections array, entry [id,refreshMinutes,showLogos,sourceKey], entry maxRecents 10
+     state load +107 ms: inside, recents 15 -> 10 at maxRecents 10, entry [id,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 10/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-N.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->10, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 10, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 10, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 10, recents 10, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-N.1: root b (no pragma), path cold, fixture N
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,playlistUrl,refreshMinutes], entry maxRecents 10
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6542 ms by release
+     at the first syncPluginApis after it (+6543 ms): sections array, entry [id,refreshMinutes,showLogos,sourceKey], entry maxRecents 10
+     state load +104 ms: inside, recents 15 -> 10 at maxRecents 10, entry [id,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 10/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-N.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->10, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 10, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 10, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 10, recents 10, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-install-F.1: root a (pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6126 ms by release
+     at the first syncPluginApis after it (+6126 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +13 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-install-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-install-F.1: root b (no pragma), path install, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 6126 ms by release
+     at the first syncPluginApis after it (+6126 ms): sections array, entry [id,maxRecents,refreshMinutes,showLogos,sourceKey], entry maxRecents 25
+     state load +10 ms: inside, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save before-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-install-F.1 service 1: handed fresh, window open, defaults False, load inside, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save before-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+stand-in calls: 98
+        24 hyprctl -j getoption animations:enabled
+        24 hyprctl -j getoption decoration:rounding
+        24 hyprctl -j getoption general:gaps_out
+        12 hyprctl systeminfo
+        12 omarchy-bar sync-glass
+         2 omarchy-notification-send --app-name IPTV -u normal -g <U+F0026> -p -r 74016 Bar setting ignored playlistUrl is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.
+crash journal after: 89
+barconfig-window: kept <work>
+# end 2026-11-27 15:57:01 CST rc 0 load 0.94 1.32 1.07 crash journal 89
+========================================================================
+# run J-C-bw-cold
+# start 2026-11-27 15:57:01 CST rig at 9d4154a dev 9d4154a load 0.94 1.32 1.07
+# env RIGW_DEV=9d4154a RIGW_KEEP=1 RIGW_BAR=1 RIGW_WIDGETS=1
+# arms a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F a-cold-F b-cold-F
+# crash journal 89
+barconfig-window: work <work>; export of 9d4154a337ffb6b921cc80d292b4a03c67a877e9; bar 1 widgets 1 patch 1 hold 0 cache cold load 0
+private-bus.sh: bus pid 2645435 at unix:path=<work>/bus/dbus-AYB4WYBgof,guid=e74814be931423722f3d35356b09fcad
+crash journal before: 89
+export: fe58952c03f2 of 9d4154a337ff (47 files)
+roots: make-root.py --probe --bar --widgets
+first-party manifests scanned: omarchy.active-window omarchy.agents omarchy.audio omarchy.bar omarchy.bluetooth omarchy.clock omarchy.dropbox omarchy.elsewhen omarchy.indicators omarchy.keyboard-layout omarchy.microphone omarchy.monitor omarchy.network omarchy.power omarchy.spacer omarchy.system-update omarchy.tailscale omarchy.tray omarchy.weather omarchy.workspaces
+stand-ins first on PATH: 563
+nested display wayland-0 (cage 2646217)
+== a-cold-F.1: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 8 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+8 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +114 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.1 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.1: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 9 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+9 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +113 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.1 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.2: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 8 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+8 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +113 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.2 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.2: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +110 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.2 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.3: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+6 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +111 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.3 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.3: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +111 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.3 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.4: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +112 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.4 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.4: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +110 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.4 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.5: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 8 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+9 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +114 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.5 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.5: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +110 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.5 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.6: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +111 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.6 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.6: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 8 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+8 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +116 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.6 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.7: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 13 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+13 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +119 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.7 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.7: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +110 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.7 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.8: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +111 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.8 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.8: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +109 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.8 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.9: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+6 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +112 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.9 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.9: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 8 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+8 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +113 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.9 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== a-cold-F.10: root a (pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +113 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict a-cold-F.10 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+== b-cold-F.10: root b (no pragma), path cold, fixture F
+   rig: ensureService fresh
+   rig: service published, shell seq
+   services 1
+   service 1: ensureService fresh (held none, bar yes, barApi no, panel no), creator ensureService>finalize>pluginShellFor>createScopedPluginShell
+     onShellChanged: sections seq, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     shapes: cfg=object/false/[object V4ReferenceObject] | layout=object/false/[object V4ReferenceObject] | right: typeof=object isArray=false length=1 proto=[object V4Sequence] index0=object:io.github.rmcdavid.iptv forOf=1:io.github.rmcdavid.iptv slice=true(1):io.github.rmcdavid.iptv json=[{"id":"io.github.rmcdavid.iptv","maxRecents":25,"playlistUrl":"<string>","refreshMinutes":120}] fields=id:string,maxRecents:number,playlistUrl:string,refreshMinutes:number entryProto=[object V4ReferenceObject] entryIsArray=false
+     window open, closed after 5 ms by widgetRegistryChanged
+     at the first syncPluginApis after it (+5 ms): sections array, entry [id,maxRecents,playlistUrl,refreshMinutes], entry maxRecents 25
+     state load +110 ms: after, recents 15 -> 15 at maxRecents 25, entry [id,maxRecents,playlistUrl,refreshMinutes]
+     first plan adopt(adoptUrl=true,playlist=true); writes 15/true/1; marker save after-close
+     says: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on
+   verdict b-cold-F.10 service 1: handed fresh, window open, defaults False, load after, trim 15->15, plan adopt(adoptUrl=true,playlist=true), marker save after-close, playlistUrl refused False
+   first state.json landed: recents 15, marker True, sources 1 [True]
+   state.json writes landed: 1
+   state.json at the end: recents 15, marker True, sources 1 (the playlist), activeKey set
+   service at the end: maxRecents 25, recents 15, marker True, sources 1, sameAsCache True, left=array(0),centerBegin=array(0),center=array(0),centerEnd=array(0),right=array(1),tray=undef(-)
+stand-in calls: 160
+        40 hyprctl -j getoption animations:enabled
+        40 hyprctl -j getoption decoration:rounding
+        40 hyprctl -j getoption general:gaps_out
+        20 hyprctl systeminfo
+        20 omarchy-bar sync-glass
+crash journal after: 89
+barconfig-window: kept <work>
+# end 2026-11-27 16:03:20 CST rc 0 load 0.93 1.05 1.01 crash journal 89

@@ -30749,6 +30749,13 @@ in the folder holds every run's printed output and every start's block.
    component then registered later only because it was still compiling. So
    the order of the host's handlers is not why the bar asks after; the
    probe's reading is the evidence.]
+   [2026-11-27, the lead, from the second measure recheck: the 10-42 ms and
+   the 7-8 ms above are measured from the probe's line above shell.qml 958,
+   where ensureService hands the made service its shell. From the service's
+   own `created` line the registration comes 2-8 ms before it (28 of 28:
+   P-bw 2-3, F-P-bw 2-3, P-rr-2 2-3, F-P-rr-2 2-3, P-rr 4-8), and from the
+   published `service` line the bar asks 5-6 ms after it (16 of 16), the
+   reference the cold start's 35-46 ms uses. The ordering verdicts stand.]
 6. **The panel** (Guide.qml, keepLoaded) registers 181-266 ms after the
    service, handed the cached object (no cache change).
 7. **Paths.**
@@ -30761,6 +30768,19 @@ in the folder holds every run's printed output and every start's block.
    - install: ONE service (`keepLoaded` keeps it through the add's second
      reload, unloadPluginServices, shell.qml 1062-1066), created at the first rescan's
      scanFinished; the second reload hands it the cached object.
+     [2026-11-27, the lead, from the second measure recheck: so in 30 of
+     lane-dh15m's 32 install starts, and 56 of 58 across both lanes and the
+     red controls (all 24 of lane-dh15fix's, and R-hold's 2). In the other
+     two, I-bw a-install-F.1 and P-bw a-install-F.3, the host's folder
+     watcher's 150 ms timer fired while the rescanPlugins IPC's reload was
+     still scanning (scans of 115 and 132 ms, against about 22 elsewhere):
+     the first scanFinished set pluginReloading false and at once true with
+     no _syncServices (shell.qml 1546-1551), and the service was made once,
+     at the second reload's scanFinished, so nothing was kept through a
+     reload there; those starts' `beforeApi kept cached` lines come 2-3 s
+     later, from pluginsChanged emissions. Their window verdicts are
+     unchanged: fresh, closed after 4 and 9 ms, the load after. This
+     coalesced order was measured on those 2 bw starts only.]
    - enableh: the entry is `{id}`, so the defaults are the entry's own:
      trimmed to 10 and migrated over an empty entry, both right by the
      host's data, after the close.
@@ -30877,7 +30897,9 @@ start folder's own play.m3u (1), the fixture's playlist ignored (2).
   host's folder watcher's reload, in which unloadPluginServices keeps the
   keepLoaded service (shell.qml 1062-1066), and that kept service was handed
   the CACHED object (`beforeApi kept cached`, 1005) in every install start
-  of I-bw, P-bw, I-rr, P-rr and P-rr-2. Beyond that -- an update of an
+  of I-bw, P-bw, I-rr, P-rr and P-rr-2 [2026-11-27, the lead, from the
+  second measure recheck: in 30 of those 32; the other two made the service
+  once, after both reloads, item 7's bracket]. Beyond that -- an update of an
   installed plugin under a running shell, the new build's service, and what
   it is handed -- it is UNVERIFIED for this question. [2026-11-27,
   lane-dh15fix2, from the measure recheck of 616061f: this said "the reload
@@ -30927,7 +30949,13 @@ start folder's own play.m3u (1), the fixture's playlist ignored (2).
 The window is open on every creation and reached by nothing on the host's
 order: what keeps it from the state load is another plugin's widget
 registration that the host makes for its own reasons straight after
-_syncServices, and without it (rr's first install) the recents half lands
+_syncServices [2026-11-27, the lead, from the second measure recheck: in
+the rescan's handler only, 1555 straight after 1553 (the install's rescan).
+On a cold start the closing registration is an asynchronous widget load
+finishing (loadPluginWidget's `Component.Asynchronous`, shell.qml 1573; the
+scanFinished pass's syncPluginWidgets skips a load in flight), 2-6 ms after
+the service; on an enable it is the NEXT pluginsChanged emission's 1441
+handler (item 3)], and without it (rr's first install) the recents half lands
 every time. So the row's P2 rests on a margin the plugin does not own. The
 proposal: P3, kept open for the fix -- findBarEntry and barEntryWritable
 reading a section that is not an Array but has a length by index (the shapes
@@ -31379,8 +31407,12 @@ above, in a bracket of this lane's):
   and the reason the bar asks after is the probe's 238 of 238, not the
   order -- on the toggle's enable the plugin's own component was registered
   10-42 ms before the service (28 of 28) and the bar still asked 7-8 ms
-  after it (16 of 16 with the bar). Tabulated by this lane over every P-bw and P-rr-2 creation: on an
-  enable 19 registrations (20 on the toggle's) between the emission and the
+  after it (16 of 16 with the bar) [2026-11-27, the lead, from the second
+  measure recheck: both figures from the probe's line above shell.qml 958;
+  2-8 ms before the service's `created` and 5-6 ms after its published
+  `service` line, item 5's bracket]. Tabulated by this lane over every P-bw and P-rr-2 creation: on an
+  enable 19 registrations (20 on the toggle's) [the lead: in P-bw; P-rr-2
+  has 0 on an enable and 1 on the toggle's, as item 3 says] between the emission and the
   creation, the closer a registration after the next `pluginsChanged`,
   4-6 ms after the probe's line (9-10 on the toggle's enable); on the
   install's rescan none between, the closer in the same handler, 4-10 ms.
@@ -31388,7 +31420,7 @@ above, in a bracket of this lane's):
   is right because of the measured order;
 - the update path (its must-fix): this rig's install arm, not the reload
   rig, is the evidence (`beforeApi kept cached` at the watcher's reload in
-  every install start), and the rest of the update path is UNVERIFIED for
+  every install start [the lead: 30 of lane-dh15m's 32, item 7's bracket]), and the rest of the update path is UNVERIFIED for
   this question, in lane-dh15m's item and on the row;
 - the warm cache: held on root b only (the split above), not shown on root
   a, the live shell's form, where C-bw-cold measured the case;
@@ -31407,7 +31439,12 @@ not run in the host's process: the cage runs of this section are 54429f1's
 for...in copy, and that the service reads the entry through the JSON copy
 in the window, in the host's own shell.qml, is UNVERIFIED -- what stands for
 it is the host's JSON.stringify of a section holding the entry's fields
-(lane-dh15m's readout, every creation) and qmltestrunner's V4 on the same Qt
+(lane-dh15m's readout, every creation [2026-11-27, the lead, from the
+second measure recheck: every creation whose sections held the entry, 202
+of lane-dh15m's 234 patched creations and 104 of lane-dh15fix's 128 -- in
+the rest, enableh and the toggle's second service, every section read
+`seq(0)` at onShellChanged -- and the state loads that fell inside the
+window]) and qmltestrunner's V4 on the same Qt
 reading the entry, the gate and the composed write through it (the spec).
 The run it needs is in the lane's proposals: lane-dh15m's rig, unchanged, on
 ac04518's export, over F-I-rr, F-R-hold and F-C-bw-cold at their counts.
@@ -31425,3 +31462,159 @@ retiredInputsToKeep and entryWith read a plain object. Service.qml's
 withKey and withoutKey (2705-2716) walk the service's own keyed maps;
 toggle, updateEntryInline, serviceFor and hide are functions; the API's
 `bar` holds bindings and `idleConfig` is not read. Cleared.
+
+### [2026-11-27, the lead: the second rechecks of 9d4154a settled, and the JSON copy in the host's own shell.qml]
+
+Branch dh15 at 9d4154a (lane-dh15fix2's tip); host omarchy 4.5.0-3,
+quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3. The workflow's second
+pass (a measure recheck and a code recheck of 9d4154a, both read-only) read
+"blocked" on record wordings and one test gap, and changed no measured
+verdict. Each item below was settled by the lead, each call the lead's call
+under the owner's standing authority of 2026-11-09.
+
+**The JSON copy in the host's process (lane-dh15fix2's proposal 1, the
+UNVERIFIED mark it left).** lane-dh15m's rig, unchanged (its tree at
+9d4154a), lane-dh15fix's wrapper with only its scratch folder changed,
+over 9d4154a's ALLOWLIST export (export fe58952c03f2, 47 files), whose shipped
+files are byte for byte ac04518's (`git diff --quiet ac04518 9d4154a --`
+over the allowlist): the JSON copy, and nothing else changed since
+lane-dh15fix's cage runs of 54429f1's for...in copy. One nested headless
+cage per run on the private bus, every quickshell under gdb, the heavy lock
+with flock -o and nice 10, roots a and b alternating. The crash journal
+read 89 before and after every shell of every run.
+
+- **J-I-rr** (rr, the reload rig's first install; install F, 4 per root;
+  15:48:55-15:51:47): 8 of 8 handed a fresh object, its sections read as
+  `V4Sequence` at onShellChanged and the entry read there (maxRecents 25);
+  the window 37-46 ms; the state load INSIDE it (+3-5 ms from
+  onShellChanged); 15 recents kept under 25 and the playlist adopted;
+  state.json, as first landed and at the end, 15 recents, the marker and
+  the playlist. As F-I-rr on 54429f1 (its window 29-38 ms), and against
+  lane-dh15m's I-rr on 27e2a84, where 15 fell to 10 in state.json in 8 of 8.
+- **J-R-hold** (bw, syncPluginApis held 6 s; cold F 3, M 1, N 1 and
+  install F 1 per root; 15:51:47-15:57:01): 12 of 12 loads inside the window
+  (6126-6594 ms), the entry read in 12 of 12. F and install (8): 15 kept,
+  the playlist adopted, the marker's save before the release, the entry in
+  shell.json ending with sourceKey set and no playlistUrl. M (2): the
+  playlistUrl refused as a retired input, as it should be with the marker
+  already on disk, 15 kept, no source. N (2): 15 -> 10, its own default with
+  no maxRecents set, the playlist adopted, sourceKey set. Every count as
+  F-R-hold's on 54429f1; lane-dh15fix's B-R-hold on 27e2a84 was red 12 of 12.
+- **J-C-bw-cold** (bw, the host's order; cold F, 10 per root;
+  15:57:01-16:03:20): 20 of 20 fresh, the entry read at onShellChanged; the
+  window 5-13 ms; the load after the close (+109-119 ms from onShellChanged);
+  15 kept, adopted, the marker's save after the close. As F-C-bw-cold.
+- In none of the 40 starts did the service log "no writable bar entry".
+  The kept evidence (1.7 MB, each start's qs.log, steps, snapshots and
+  shell.json and state.json at its start and end) is in the lead's session
+  scratch, `lead-dh15/arms/<run>/`, which a reboot wipes; every start's
+  block is in RESULT-2026-11-27.txt.
+
+So the reading lane-dh15fix measured with the for...in copy holds with the
+JSON copy in the host's own shell.qml: the entry read at onShellChanged
+in every creation whose host data held it, the recents kept under
+maxRecents 25 and the playlist adopted wherever the load fell inside the
+window, and the host's order unchanged. The UNVERIFIED mark on "the host's
+process reads the entry through the JSON copy in the window" is lifted for
+fixture F's plain entry. It stands for the `__proto__` form and a nested
+list or object in an entry, which were read in qmltestrunner's V4 on the
+same Qt and not in the host's process (no fixture holds them).
+
+**The code recheck's should-fix: hostList's zero boundary.** Its mutant R11
+(`n >= 0` read as `n > 0`) survived the D-HOST-15 node block (14 of 14)
+and the full suite, because an empty V4Sequence-tagged list of section
+names was read nowhere. The section-list check ("the host's list of
+sections is read in the sequence form as the Array is, and anything else
+falls back to 4.0.x's three") now also reads an entry in `center` through
+`sequence([])` and through `[]`, and expects it absent and unwritable both
+ways: no section walked, not the fallback. The block, run alone through
+`IPTV_MODEL` as the lanes ran it: 14 checks, 14 green on the tree; on R11's
+mutant, 1 red (that check). lane-dh15fix2's 18 one-decision mutants,
+re-run with its runner over the tree, each red at exactly its counts (2, 1,
+1, 1, 1, 11, 1, 1, 1, 11, 2, 10, 10, 2, 1, 1, 11, 8).
+
+**The node double's plain prototype (the code recheck's nit).** A plain
+entry's double answered its prototype as Object.prototype, where V4 answered
+an object that is not (lane-dh15fix2's probe, `map:normal`:
+`protoIsObjectProto=false`, `protoTag=[object Object]`, no own name), so the
+double was kinder than V4 to a plainness test (rule 10). It now answers a
+stand-in of that shape (`Object.create(Object.prototype)`, one per
+wrapper), pinned in the doubles' own check (`entryProto`: not
+Object.prototype, `[object Object]`, 0 own names). No shipping path asks a
+wrapper its prototype (the JSON copy asks toJSON, its own keys and a
+descriptor each), so no count moves: the block 14 of 14, the 18 mutants as
+above.
+
+**The analyzer's branch (the code recheck's nit).** A mutant closing a
+shell at onShellChanged only when it read no section (`== "none"` for
+`!= "seq"`) left tests/test_barconfig_window.py green. A new test, a fresh
+object whose sections already read as Arrays, expects the window closed at
+onShellChanged (`closedBy` `fresh-array`) and a later marker save after
+the close: 12 OK on the tree, 1 failure on that mutant. No kept start has
+such a creation, so no recorded number moves. The python floor goes 3146 ->
+3147.
+
+**The `__proto__` residual (the code recheck's nit).** Stated plainly: an
+entry whose shell.json text holds a `__proto__` key reads as absent in the
+window, so for that one hand-edited shape D-HOST-15 is not fixed: a state
+load inside the window trims the recents to the default 10 and saves them,
+and a first reconcile sets the migration marker over an entry read as empty,
+on the orders where the load lands inside (the reload rig's first install,
+the held control; on the host's order it landed after the close in 110 of
+110). After the window the Array path reads the entry's own settings. The
+lead's call: accepted as the trade, because no faithful reading of V4's
+merged prototype exists; written on the row.
+
+**The host's own `__proto__` sibling (the code recheck's nit), filed as
+D-HOST-17 (P4, host-owned).** The host bar's BarModel.entrySettings
+(plugins/bar/BarModel.js 17-24, read in 4.5.0-3) copies a layout entry with
+for...in, and `copy["__proto__"] = nested` sets the copy's prototype, so a
+bar widget's `setting()` reads the nested object's values: for this plugin
+only the bar widget's view settings. Read, not measured; nothing to change
+in the plugin; an upstream note waits for the owner's word.
+
+**The measure recheck's four wordings**, each corrected in a bracket of the
+lead's at its place above and checked first against the kept lines (I-bw
+a-install-F.1 read again: `pluginReloading false` and at once `true` at the
+first scanFinished, `beforeApi ensureService fresh` only after the second,
+`beforeApi kept cached` 3 s later; b-install-F.1 the usual order):
+- "every install start": 30 of lane-dh15m's 32 install starts and 56 of 58
+  across both lanes and the red controls; the other two coalesced the IPC's
+  reload and the watcher's into one (lane-dh15m's item 7, its update-path
+  item, this section's settled list and the row);
+- "straight after _syncServices": in the rescan's handler only; a cold
+  start's closer is an asynchronous widget load finishing, an enable's the
+  next pluginsChanged emission (lane-dh15m's "Proposed");
+- the toggle's timings: from the probe's line above shell.qml 958; 2-8 ms
+  before the service's `created`, 5-6 ms after its published `service`
+  line; 19 and 20 registrations in P-bw only (item 5 and the settled list);
+- the JSON copy's stand-in evidence: every creation whose sections held the
+  entry, 202 of 234 and 104 of 128, and the loads inside the window.
+
+**The lead's calls on the lanes' proposals.**
+1. D-HOST-15 is fixed on dev at the merge of dh15, unreleased, and P3, not
+   P2: the window opens on every creation, but on the host's own order no
+   write from the defaults landed in 110 of 110 creations; it was reached
+   only without the host's first-party widgets (the reload rig's first
+   install, 16 of 16) and in the held control (lane-dh15m's proposal 1 and
+   lane-dh15fix's proposal 1, taken together).
+2. The copy is option (a), the JSON round trip (lane-dh15fix2's proposal 2,
+   taken).
+3. The sorted key order of a write composed in the window (one extra
+   "dirty" shell.json write, the entry stored with its keys sorted; the JSON
+   copy reads the same QVariantMap order) is accepted as benign
+   (lane-dh15fix's proposal 5).
+4. The harness double for the window is filed as F-HARNESS-136 (P4)
+   (lane-dh15fix's proposal 2).
+5. The upstream note (createScopedPluginShell assigning the parsed copy
+   from script, as syncPluginApis does) waits for the owner's word
+   (lane-dh15fix's proposal 3).
+6. The CHANGELOG line is the lead's, kept for the cut: "The service reads
+   its bar settings from the moment the shell creates it: a freshly made
+   shell API carried the bar layout in a form the plugin's readers refused,
+   so a state load in that moment could trim the recently watched list to 10
+   and lose a pending migration of the playlist setting (D-HOST-15)."
+7. Not chased, and not filed (neither changes a verdict): why root a's QML
+   cache does not hold across warm starts, and why the host's bar asks 5-6
+   ms after the service on the toggle's enable when the plugin's widget
+   registered 2-8 ms before it.
