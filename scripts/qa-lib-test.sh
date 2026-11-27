@@ -2340,6 +2340,75 @@ kill "$fw_player" 2>/dev/null; wait "$fw_player" 2>/dev/null
 is "the layer window on the session's OWN compositor (a desk FAIL): refused" "$(fg_word desk "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}")" "3 0"
 ck "with no cage hint: the guide is named as failing to take the keyboard" \
    '! grep -q -- "--window floating" "$FG/out" && grep -q "this is the guide failing to take it, not the display" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
+# F-HARNESS-60: on the desk the guide's layer window turns active up to a
+# second AFTER the guide reports open (read on the owner's Hyprland,
+# 2026-10-27: false at the first reply with open true, true 1.1 s later), and
+# the guard asked once, so a key sent in that gap was refused and, on the
+# desk, graded FAIL. The guard now asks again for a bounded time while the
+# keyboard is the guide's and its window inactive, on the session's own
+# compositor only: under a cage that reading never changes and is the SKIP.
+# fg_stub_late's qs answers $2 for its first $1 focusState calls and $3 from
+# then on, and counts them, so "it waited" is the stub's own count and not a
+# clock. On f2668e3's run.sh the first case reads "3 0 1": refused at once.
+fg_stub_late() {   # fg_stub_late <early calls> <early reply> <late reply>
+  echo 0 >"$FG/late.n"
+  { printf '#!/bin/bash\n'
+    printf 'printf "%%s\\n" "$*" >>%q\n' "$FG/qs.argv"
+    printf 'n=$(cat %q); n=$((n + 1)); echo "$n" >%q\n' "$FG/late.n" "$FG/late.n"
+    printf 'if (( n <= %s )); then cat <<%s\n%s\nSTUB_EOF\n' "$1" "'STUB_EOF'" "$2"
+    printf 'else cat <<%s\n%s\nSTUB_EOF\nfi\n' "'STUB_EOF'" "$3"
+    printf 'exit 0\n'
+  } >"$FG/bin/qs"
+  chmod +x "$FG/bin/qs"
+}
+fg_late() {   # fg_late <desk|cage> <settle tenths or ""> <verb...> -> "<exit> <wtype calls> <focusState asks>"
+  local where=$1 tenths=$2 out; shift 2
+  if [[ -n $tenths ]]; then
+    out=$(HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-${where/desk/tn} \
+          OMARCHY_IPTV_FOCUS_SETTLE_TENTHS=$tenths fg_run "$@")
+  else   # run.sh's own default bound
+    out=$(unset OMARCHY_IPTV_FOCUS_SETTLE_TENTHS
+          HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-${where/desk/tn} fg_run "$@")
+  fi
+  printf '%s %s\n' "$out" "$(cat "$FG/late.n")"
+}
+FG_INACTIVE=${FG_OPEN/\"windowActive\":true/\"windowActive\":false}
+fg_stub_late 2 "$FG_INACTIVE" "$FG_OPEN"
+is "the desk, the window active at the third ask: the guard waits, then the key is sent" \
+   "$(fg_late desk "" key j)" "0 2 3"
+fg_stub_late 2 "$FG_INACTIVE" "$FG_OPEN"
+is "under a cage the same replies refuse at the first ask: no wait where the window cannot map" \
+   "$(fg_late cage "" key j)" "3 0 1"
+fg_stub_late 2 "$FG_INACTIVE" "$FG_OPEN"
+is "the wait is a lever: at 0 tenths the desk refuses at the first ask too" \
+   "$(fg_late desk 0 key j)" "3 0 1"
+fg_stub_late 2 "${FG_INACTIVE/\"keyboard\":true/\"keyboard\":false}" "$FG_OPEN"
+is "no item of the guide holds focus: nothing to wait for, refused at the first ask" \
+   "$(fg_late desk "" key j)" "3 0 1"
+fg_stub_late 2 "${FG_INACTIVE/\"open\":true/\"open\":false}" "$FG_OPEN"
+is "a closed guide is not waited for either" "$(fg_late desk "" key j)" "3 0 1"
+fg_stub_late 2 "${FG_OPEN/\"windowActive\":true/\"windowActive\":null}" "$FG_OPEN"
+is "nor a window whose state the harness could not read: only an observed false is the gap" \
+   "$(fg_late desk "" key j)" "3 0 1"
+fg_stub_late 9999 "$FG_INACTIVE" "$FG_OPEN"
+fh60_t0=${EPOCHREALTIME/[.,]/}
+fh60_got=$(fg_late desk 6 key j)
+fh60_ms=$(( (${EPOCHREALTIME/[.,]/} - fh60_t0) / 1000 ))
+ck "a window that never turns active is refused once the bound is over, asked more than once (got '$fh60_got' in $fh60_ms ms)" \
+   '[[ ${fh60_got% *} == "3 0" ]] && (( ${fh60_got##* } > 1 )) && (( fh60_ms >= 600 && fh60_ms < 15000 ))'
+ck "and the refusal says how long it waited, with the desk's words and the tag" \
+   'grep -q "still inactive after 0.6 s of asking" "$FG/out" && grep -q "this is the guide failing to take it, not the display" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
+fg_stub_late 2 "$FG_INACTIVE" "${FG_OPEN/\"open\":true/\"open\":false}"
+is "the last reply is the one judged: a guide that closed while the guard waited refuses" \
+   "$(fg_late desk "" key j)" "3 0 3"
+ck "as closed" 'grep -q "the guide is CLOSED" "$FG/out"'
+fg_stub_late 2 "$FG_INACTIVE" "$FG_OPEN"
+# type's read-back is not stubbed here, so it ends 1 ("not what was typed");
+# what is read is that the guard no longer refuses it up front with 3.
+fh60_type=$(fg_late desk "" type sky)
+ck "type waits the same way up front: past the guard, its keys sent (got '$fh60_type')" \
+   '[[ ${fh60_type%% *} != 3 ]] && ! grep -q "REFUSED: the compositor has not given" "$FG/out" && grep -q sky "$FG/wtype.log"'
+
 # A reply that does not say is not a yes: a harness from before this field,
 # or a null the snapshot could not read. Refused as "cannot tell", UNtagged,
 # so no scenario can turn it into a SKIP.
@@ -4574,7 +4643,11 @@ is "a start whose shell writes no pid fails, ends its gdb and what gdb started, 
 # rig says so. Red on bcd387f's run.sh (no end_gdb to take out; "1|held|gdb
 # left|child left|slow|0|"), and on four mutants of the fix: no call, no
 # TERM (slow), GDB_PID kept (held), no wait (early).
-EXPECTED=839
+# 839 -> 850 on 2026-11-27 (F-HARNESS-60, the daily run): the focus guard
+# asks again on the desk while the guide's window is not active yet, over a
+# stub qs that counts its calls. Six red on f2668e3's run.sh; seven mutants
+# of the fix each red.
+EXPECTED=850
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -105,8 +105,11 @@
 # the desk"): Hyprland's exclusive keyboard focus on the guide's layer
 # surface reads windowActive true -- but about a second AFTER the guide
 # reports open (false at the first focusState with open true, true 1.1 s
-# later), so a key sent in that gap is refused here, and on the desk that
-# refusal is a FAIL (F-HARNESS-60).
+# later), so a key sent in that gap was refused here, and on the desk that
+# refusal is a FAIL (F-HARNESS-60). Since 2026-11-27 the guard asks again
+# for up to OMARCHY_IPTV_FOCUS_SETTLE_TENTHS tenths of a second (20) while
+# it reads that state on the session's own compositor, then refuses as
+# before; held over a stub in scripts/qa-lib-test.sh, not watched on a desk.
 #
 # Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
@@ -752,6 +755,15 @@ screen_locked() { qa_screen_locked "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIM
 # against an instance that is simply not there fails fast, but a half-dead one
 # need not, and the answer to "I cannot tell" is to refuse and say so.
 FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
+# How long the guard keeps asking while the guide holds Qt's focus and its
+# window is not active yet, on the session's own compositor (F-HARNESS-60):
+# tenths of a second, 20 by default, 0 for one ask as before. Read on the
+# owner's Hyprland the window turned active 1.1 s after the guide reported
+# open; that is one reading pair and not a distribution, so the default is
+# about twice it and a slower desk has the lever.
+FOCUS_SETTLE_TENTHS=${OMARCHY_IPTV_FOCUS_SETTLE_TENTHS:-20}
+[[ $FOCUS_SETTLE_TENTHS =~ ^[0-9]{1,3}$ ]] || FOCUS_SETTLE_TENTHS=20
+FOCUS_SETTLE_TENTHS=$(( 10#$FOCUS_SETTLE_TENTHS ))
 
 # Refuse unless the harness guide holds the keyboard, naming what was found so
 # an operator can tell "the guide is closed" from "another surface has it".
@@ -781,7 +793,7 @@ FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
 # Fails CLOSED. Any answer that is not a readable "yes" refuses, because the
 # whole point is that a keystroke into an unknown surface is invisible.
 require_guide_focus() {
-  local what=$1 reply status verdict diag errfile target=nested players="" dir=$SCRATCH p c
+  local what=$1 reply status verdict diag errfile target=nested players="" dir=$SCRATCH p c start waited=0
   # The two streams are kept APART, and this is the whole finding of the first
   # review of this guard. `2>&1` here fed any diagnostic `qs` wrote on stderr
   # into json.loads, and the guard fails closed, so ONE stray line turned every
@@ -796,8 +808,26 @@ require_guide_focus() {
     echo "[run.sh] $what REFUSED: cannot make a temp file to read the harness reply" >&2
     return 1
   }
-  reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc focusState 2>"$errfile")
-  status=$?
+  # F-HARNESS-60: on the session's own compositor the guide's window turns
+  # active a moment AFTER the guide reports open, so one ask refused a key
+  # sent in that gap. While the reply reads exactly that state -- open, an
+  # item of the guide holding focus, the window inactive -- the question is
+  # asked again until the bound is over, and the LAST reply is judged below
+  # as a single one always was. Never under a nested compositor: there the
+  # layer window cannot map, the reading never changes, and it is the SKIP.
+  qa_target_nested "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || target=desk
+  start=${EPOCHREALTIME/[.,]/}
+  while :; do
+    reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc focusState 2>"$errfile")
+    status=$?
+    (( status == 0 )) || break
+    [[ $target == desk ]] || break
+    (( (${EPOCHREALTIME/[.,]/} - start) / 100000 < FOCUS_SETTLE_TENTHS )) || break
+    [[ $(qa_json_field 'd["ok"] is True and d["open"] is True and d["keyboard"] is True and d["windowActive"] is False' "$reply") == true ]] || break
+    waited=1
+    sleep 0.2
+  done
+  (( waited )) && waited="$(( FOCUS_SETTLE_TENTHS / 10 )).$(( FOCUS_SETTLE_TENTHS % 10 ))"
   diag=$(tr '\n' ' ' <"$errfile")
   rm -f "$errfile"
   if (( status == 124 )); then
@@ -816,13 +846,12 @@ require_guide_focus() {
   # surface that took the keyboard when the floating guide lost it under a
   # cage (QA-RESULTS "F-M3-24"). Its pid, never its argv: the command line
   # is read only to match this scratch's socket.
-  qa_target_nested "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || target=desk
   [[ $dir == /* ]] || dir=$PWD/$dir
   for p in $(pgrep -x mpv 2>/dev/null); do
     c=$(qa_cmdline "$p") || continue
     [[ $c == *"input-ipc-server=$dir/runtime/omarchy-iptv/mpv.sock"* ]] && players="${players:+$players,}$p"
   done
-  verdict=$(python3 - "$reply" "$QA_KEY_WINDOW_INACTIVE" "$target" "$players" <<'PY'
+  verdict=$(python3 - "$reply" "$QA_KEY_WINDOW_INACTIVE" "$target" "$players" "$waited" <<'PY'
 import json, sys
 raw = sys.argv[1]
 try:
@@ -879,6 +908,9 @@ elif active is not True:
     elif kind == "layer":
         msg += (". This is the session's own compositor, which has layer-shell, so the open guide's layer "
                 "window should hold the keyboard: this is the guide failing to take it, not the display")
+    if sys.argv[5] != "0":
+        # F-HARNESS-60: the guard kept asking, and says for how long.
+        msg += " (still inactive after %s s of asking)" % sys.argv[5]
     print("no " + msg + "; " + where)
 elif d.get("exhausted") and not d.get("keyboard"):
     print("no the focus walk gave up before it found a focused item, so I cannot tell; " + where)

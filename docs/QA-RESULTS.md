@@ -30303,3 +30303,58 @@ two test files for "never fires", "old inode", "replaced underneath",
 "raises nothing", "raised nothing", "nothing raised" and "watch lost":
 the other hits are about the linked `state.json`, a Timer and the cache's
 reload, and stand. CHANGELOG.md's 0.7.8 entry stays as released.
+
+## F-HARNESS-60: the focus guard asks again (the nightly run, 2026-11-27)
+
+Read on the owner's Hyprland on 2026-10-27, the guide's layer window turned
+active 1.1 s after the guide reported open, and `run.sh`'s focus guard asked
+once: a key sent in that gap was refused with exit 3, which on the desk is a
+FAIL and no SKIP.
+
+`require_guide_focus` now asks `focusState` again, every 0.2 s, while all of
+these hold: the keys go to the session's own compositor (`qa_target_nested`
+says not nested), the reply reads `ok` and `open` true, `keyboard` true and
+`windowActive` exactly false, and fewer than
+`OMARCHY_IPTV_FOCUS_SETTLE_TENTHS` tenths of a second have passed (20 by
+default; 0 is one ask, as before). The last reply is then judged as the only
+one was, and a refusal after a wait ends "(still inactive after N s of
+asking)". Under a nested compositor nothing changed: one ask, the tagged
+refusal, m3's SKIP.
+
+The lead's calls under the owner's standing authority of 2026-11-09: the
+default of 2 s, about twice the one reading pair there is, with the lever for
+a slower desk; and no restriction to the layer window, because the row names
+the state and not the window kind.
+
+### Checks
+
+Eleven in `scripts/qa-lib-test.sh` (839 -> 850), run.sh's own guard over a
+stub `qs` that counts its `focusState` calls and answers one reply for its
+first N and another from then on. Each reads "exit, wtype calls, asks":
+
+- the desk, active at the third ask: `0 2 3`;
+- a cage, the same replies: `3 0 1`;
+- the desk at 0 tenths: `3 0 1`;
+- the desk with no item of the guide focused, with the guide closed, and
+  with a null `windowActive`: `3 0 1` each;
+- the desk, never active, at 6 tenths: refused after at least 600 ms and
+  more than one ask, saying "still inactive after 0.6 s of asking" beside
+  the desk's words and the tag;
+- the desk, closed at the third ask: `3 0 3`, refused as closed;
+- `type`: past the guard, its keys sent.
+
+Red first: on f2668e3's run.sh six of the eleven fail (`3 0 1` where
+`0 2 3` stands, and the five that need a second ask). Seven mutants of the
+fix, one decision each, all red: the wait under a cage too (1 check), no
+keyboard condition (1), no open condition (1), a null read as false (1), no
+bound (3; the run ends at the test's own 20 s timeout), no word of the wait
+(1), a default of 0 tenths (4).
+
+**UNVERIFIED on a desk.** Nothing here watched Hyprland give the window the
+keyboard inside the wait; the stub chose every reply. The next desk run of
+a keyed scenario is the observation.
+
+Searched (rule 15) for other single reads of `windowActive` or `focusState`
+taken straight after an open: clip-scenario's `focus_held` is already
+polled by its caller, m3's `shot` goes through this guard, and `type`'s
+inner keys do too. No other reader found in `scripts/`.

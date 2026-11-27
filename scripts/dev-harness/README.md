@@ -401,7 +401,11 @@ found, rather than typing into an unknown surface. Two refusals:
   headless cage the production guide window never maps and its catcher still
   read `activeFocus` true. A false `windowActive` refuses with the tag
   `(window-inactive)` (`QA_KEY_WINDOW_INACTIVE` in `scripts/qa-lib.sh`); a
-  missing or null one refuses as "cannot tell", untagged. See "Keys under a
+  missing or null one refuses as "cannot tell", untagged. On the session's
+  own compositor the window turns active a moment after the guide reports
+  open (1.1 s in the one desk reading), so there the guard asks again for up
+  to `OMARCHY_IPTV_FOCUS_SETTLE_TENTHS` tenths of a second (20) before it
+  refuses (F-HARNESS-60; held over a stub, not watched on a desk). See "Keys under a
   nested cage" below.
   Escapable with `--to-compositor`, which **must come first** -- everything
   after it belongs to `wtype`, whose own `--` means "the rest is text" -- and
