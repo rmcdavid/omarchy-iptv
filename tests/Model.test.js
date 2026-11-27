@@ -3064,12 +3064,28 @@ checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address
   const shapes = [i => "https://192.168.1.20/a" + i + ".png", i => "https://10." + (i >> 8) + "." + (i & 255) + ".9/a.png",
                   i => "https://cdn" + i + "/a.png", i => "https://cdn.test/Channel " + i + ".png",
                   i => "https://cdn.test/" + String.fromCharCode(0xd1) + i + ".png", i => "https://cdn.test:000443/a" + i + ".png"]
-  const best = f => {
+  // F-PERF-3 (2026-11-27): the two timings are taken in turn, five pairs, the
+  // least of each kept, and a ratio that does not read under half is measured
+  // again, up to three rounds, the least ratio answering. It was five runs of
+  // one and then five of the other, once, and a burst of load over one half
+  // crossed the bound (one red in twelve runs at load 2). Measured this day,
+  // four rounds a shape, three runs: 0.18 to 0.41 idle and 0.21 to 0.44
+  // beside three busy loops, against 1.15 to 2.80 on c32a936's model for the
+  // five shapes that showed no column there.
+  const once = f => {
+    const t0 = process.hrtime.bigint()
+    f()
+    return Number(process.hrtime.bigint() - t0) / 1e6
+  }
+  const leastRatio = (scan, validate) => {
     let least = Infinity
-    for (let k = 0; k < 5; k++) {
-      const t0 = process.hrtime.bigint()
-      f()
-      least = Math.min(least, Number(process.hrtime.bigint() - t0) / 1e6)
+    for (let round = 0; round < 3 && !(least < 0.5); round++) {
+      let s = Infinity, v = Infinity
+      for (let k = 0; k < 5; k++) {
+        s = Math.min(s, once(scan))
+        v = Math.min(v, once(validate))
+      }
+      least = Math.min(least, s / v)
     }
     return least
   }
@@ -3081,9 +3097,9 @@ checkCall("D-SINK-112: over 10,000 rows none of whose logos counts -- an address
       rows.push({ name: "c" + i, logo: u })
     }
     const hosts = Model.logoAuthorityHosts(rows)
-    const scan = best(() => Model.logoColumnShown(rows, true, "/c/logos", hosts))
-    const validate = best(() => { for (const u of urls) Model.validateSourceUrl(u) })
-    return [Model.logoColumnShown(rows, true, "/c/logos", hosts), scan < validate / 2]
+    const ratio = leastRatio(() => Model.logoColumnShown(rows, true, "/c/logos", hosts),
+                             () => { for (const u of urls) Model.validateSourceUrl(u) })
+    return [Model.logoColumnShown(rows, true, "/c/logos", hosts), ratio < 0.5]
   })
 }, [[false, true], [false, true], [false, true], [false, true], [false, true], [false, true]])
 checkCall("D-SINK-112: Service.qml's own binding holds the map of the channel list's logo authorities while logos are on, and an empty one while they are off", () => {

@@ -30396,3 +30396,45 @@ Not run: m3 itself, caged or on the desk. Searched (rule 15) m3-scenario.sh
 for other keyed pairs whose second key undoes the first's saved state: T5
 has its fallback (F-HARNESS-54), and P1's undo is already `ipc remove`, not
 a key.
+
+## F-PERF-3: the column-cost checks ask less of chance (the nightly run, 2026-11-27)
+
+"D-SINK-112: over 10,000 rows none of whose logos counts ... the column
+test costs under half of validating the addresses" (tests/Model.test.js)
+timed five runs of `Model.logoColumnShown`, then five loops of
+`Model.validateSourceUrl`, once, and compared the two least times. A burst
+of load over one half crossed the bound: one red in twelve runs at load 2
+on 2026-11-24, and two lanes before that.
+
+What the ratio is, measured this day in node on this machine, four rounds
+a shape, three runs each:
+
+| model | load | least and greatest ratio over the six shapes |
+|---|---|---|
+| dev (3ca44c9) | idle | 0.18 to 0.41 |
+| dev (3ca44c9) | three busy loops, `nice -n 10` | 0.21 to 0.44 |
+| c32a936 | idle | 1.15 to 2.80 (five shapes; the padded port showed a column there) |
+
+So one half separates the two by a wide margin and the bound stays. What
+changed is how the two times are taken: in turn, five pairs, the least of
+each kept, and a ratio that does not read under half is measured again, up
+to three rounds, the least ratio answering. `test_logoColumnScanInV4` in
+tests/Model.spec.qml had the same shape (three runs of one, then three of
+the other, once) and is repaired the same way (rule 15).
+
+### Checks
+
+- **Chance.** The check's own text, old form and new, run alone 24 times
+  each beside three loops that burn 0.15 s and rest 0.1 to 0.3 s, under
+  `nice -n 10`: the old form red in 13 of 24, the new form in 0 of 24.
+- **Still red for the cost.** The new form over a model whose column test
+  also validates every row: red in 6 of 6 shapes; every second row: 6 of
+  6; every fourth: 3 of 6. On c32a936's model the same interleaved
+  measurement reads 1.15 and over.
+- **The spec's twin**, the one test function under gdb with a decoy home:
+  green on the tree (23 to 31 ms against 134 to 387 ms), red on c32a936's
+  model with the new spec (237 to 459 ms against 170 to 282 ms, and the
+  padded shape showing a column).
+
+Not asked: a ratio between 0.44 and 0.5 on a slower machine. The lever, if
+one is ever needed, is the round count, not the bound.
