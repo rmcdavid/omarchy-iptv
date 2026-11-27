@@ -10,9 +10,17 @@ nested headless cage per run on ../../private-bus.sh, every quickshell
 under gdb, through a lane wrapper that printed the `# run`, `# start`,
 `# env`, `# arms` and `# end` lines:
   RIGW_DEV=27e2a84 RIGW_KEEP=1 <env> run.sh ARM...
-"bw" in a name is RIGW_BAR=1 RIGW_WIDGETS=1 (the host's bar and its 19
-first-party bar widgets in the root: the host's order); "rr" neither (the
-reload rig's roots). The plugin is 27e2a84's ALLOWLIST export (export.py,
+"bw" in a name is RIGW_BAR=1 RIGW_WIDGETS=1 (the host's bar and the 19
+bar-widget-only first-party plugins in the root: the host's order, without
+its services, overlays, panels and menu); "rr" neither (the reload rig's
+roots). [2026-11-27, lane-dh15fix2: this said "its 19 first-party bar
+widgets". 21 first-party manifests declare bar-widget; --widgets also
+switches off omarchy.media (["service","bar-widget"]) and omarchy.menu
+(["menu","bar-widget"]), both keepLoaded, with every other kind that is not
+bar-widget alone. And every block below was read again with the analyzer as
+lane-dh15fix2 left it (a load that reads no Array is `unknown-<kind>`, never
+`after`): 338 of 338 kept starts print the same lines, and no service's
+load reads anything but `inside` (72) or `after` (290).] The plugin is 27e2a84's ALLOWLIST export (export.py,
 commit d0ba9ddd), unchanged but for service-log.patch on the decoy copy (not
 in NP-bw). Host: omarchy 4.5.0-3 (shell.qml and services/PluginRegistry.qml
 pinned by ../codebehind-reload/make-root.py), quickshell 0.3.2.r7.g2b4501a-1,

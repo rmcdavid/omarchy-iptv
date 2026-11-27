@@ -108,8 +108,15 @@
   }
 
   // The two signals syncPluginApis answers (1081-1092). The rig's handlers
-  // are connected after the host's (this block is the root's last), so each
-  // line follows the host's syncPluginApis for the same emission.
+  // run BEFORE the host's for the same emission, measured (lane-dh15fix2,
+  // 2026-11-27, from the kept logs): a `pluginsChanged` line is followed by
+  // the `syncPluginApis held` line the host's own syncPluginApis prints
+  // (--hold-sync), and a `widgetRegistryChanged` line by the `apiBarConfig`
+  // that host's syncPluginApis raises. So the rig line printed just before an
+  // `apiBarConfig` names the emission whose handler made it, which is what
+  // analyze.py's closedBy reads. [This said, until then, that the rig's
+  // handlers were connected after the host's and each line followed the
+  // host's syncPluginApis -- the opposite of the logs.]
   Connections {
     target: shell.pluginRegistry
     function onPluginsChanged() {

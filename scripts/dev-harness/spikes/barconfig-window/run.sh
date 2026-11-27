@@ -33,11 +33,21 @@
 #   RIGW_CACHE=warm      every start of a root at ONE decoy HOME path (made
 #                        fresh each time, the plugin copied in with its
 #                        files' times kept) over one QML disk cache per root,
-#                        so a start after the first compiles nothing, as a
-#                        shell started at login over an unchanged install
-#                        does; the default, cold, is the reload rig's: a
+#                        meant as a shell started at login over an unchanged
+#                        install; the default, cold, is the reload rig's: a
 #                        fresh path and an empty cache per start, as the
-#                        first start after an install or an update
+#                        first start after an install or an update. It is
+#                        shown to cut the service's start on ROOT B only:
+#                        there a later warm start took 179-199 ms from the
+#                        scan to the published service in C-bw-warm (cold,
+#                        C-bw-cold: 1256-1283) and 156-161 ms in C-rr-warm-2.
+#                        On ROOT A, the pragma root the live shell runs, it
+#                        took 1207-1226 ms in C-bw-warm (cold: 1308-1334) and
+#                        698-719 ms in C-rr-warm-2 (cold, C-rr-cold: 791-850),
+#                        so a warm start there is not shown to compile
+#                        nothing: it behaves as a cold one (lane-dh15fix2,
+#                        from the kept logs; this said "a start after the
+#                        first compiles nothing" of both roots)
 #
 # PATHS, each the host's own, driven by its own IPC (the calls the omarchy
 # commands make) and its own folder watcher:
