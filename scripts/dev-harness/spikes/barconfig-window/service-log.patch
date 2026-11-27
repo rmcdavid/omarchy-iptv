@@ -1,0 +1,80 @@
+diff --git a/Service.qml b/Service.qml
+index 4b9cf3b..bd8234a 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -1762,6 +1762,7 @@ Item {
+   // been decided by the time the handler returns, so the save goes then,
+   // from a turn of its own (R26b): never from inside the handler.
+   function stateLoadArrived(result) {
++    console.log("IPTV-LOG " + Date.now() + " stateLoadArrived loaded=" + (result.loaded === true) + " verifyPending=" + root.stateVerifyPending)  // DH15-LOG
+     // D-SINK-103: the EMPTY file `state private` creates when nothing is at
+     // the path is ours, made for the write that follows it, and a view that
+     // watches the folder may load it first (a file that appears reloads).
+@@ -2001,6 +2002,7 @@ Item {
+     // that dies before that is exactly the case PO-3 needs the record for.
+     // noteSessionOutcome() has already written if it changed anything.
+     if (adopted.write && root.userState === merged) root.saveState()
++    console.log("IPTV-LOG " + Date.now() + " stateLoad onDisk=" + onDisk.recents.length + " kept=" + root.userState.recents.length + " diskMarker=" + (onDisk.entryMigrated === true) + " diskSources=" + onDisk.sources.length + " trimMax=" + root.maxRecents + " " + (function () { var o = []; try { var c = root.shell ? root.shell.barConfig : undefined; var L = c ? c.layout : undefined; var secs = Commons.Util.barSections; for (var i = 0; i < secs.length; i++) { var a = L ? L[secs[i]] : undefined; o.push(secs[i] + "=" + (a === undefined ? "undef" : (Array.isArray(a) ? "array" : (a === null ? "null" : "seq"))) + "(" + (a && a.length !== undefined ? a.length : "-") + ")") } var e = Model.findBarEntry(c, root.pluginId, Commons.Util.barSections); o.push("entry=[" + Object.keys(e || {}).sort().join(",") + "]"); o.push("entryMaxRecents=" + Model.settingsFrom(e).maxRecents) } catch (err) { o.push("threw=" + err) } o.push("boundMaxRecents=" + root.maxRecents); o.push("boundPlaylistSet=" + (String(root.settings.playlistUrl || "") !== "")); return o.join(" ") })() + " || " + (function () { var o = []; try { var c = root.shell ? root.shell.barConfig : undefined; var L = c ? c.layout : undefined; o.push("cfg=" + typeof c + "/" + Array.isArray(c) + "/" + Object.prototype.toString.call(c)); o.push("layout=" + typeof L + "/" + Array.isArray(L) + "/" + Object.prototype.toString.call(L)); var secs = Commons.Util.barSections; for (var i = 0; i < secs.length; i++) { var a = L ? L[secs[i]] : undefined; if (!a || !a.length) continue; var p = [secs[i] + ":"]; p.push("typeof=" + typeof a); p.push("isArray=" + Array.isArray(a)); p.push("length=" + a.length); p.push("proto=" + Object.prototype.toString.call(a)); try { p.push("index0=" + typeof a[0] + ":" + (a[0] ? a[0].id : "-")) } catch (e1) { p.push("index0Threw=" + e1) } try { var n = 0, f = ""; for (var x of a) { if (n === 0) f = x ? x.id : ""; n++ } p.push("forOf=" + n + ":" + f) } catch (e2) { p.push("forOfThrew=" + e2) } try { var sl = Array.prototype.slice.call(a); p.push("slice=" + Array.isArray(sl) + "(" + sl.length + "):" + (sl[0] ? sl[0].id : "-")) } catch (e3) { p.push("sliceThrew=" + e3) } try { p.push("json=" + JSON.stringify(a, function (k, v) { return (typeof v === "string" && k !== "id") ? "<" + typeof v + ">" : v })) } catch (e4) { p.push("jsonThrew=" + e4) } try { var en = a[0]; var fl = []; for (var k in en) fl.push(k + ":" + typeof en[k]); p.push("fields=" + fl.join(",")); p.push("entryProto=" + Object.prototype.toString.call(en)); p.push("entryIsArray=" + Array.isArray(en)) } catch (e5) { p.push("fieldsThrew=" + e5) } o.push(p.join(" ")) } } catch (err) { o.push("threw=" + err) } return o.join(" | ") })())  // DH15-LOG
+     root.reconcile(true)
+     root.startCacheLayout()
+     // The reattach probe beat the file here (it usually does: ~130 ms from
+@@ -2160,6 +2162,7 @@ Item {
+     root.lastSaveState = root.userState
+     root.lastSaveText = text
+     root.stateSavesInFlight = 1
++    console.log("IPTV-LOG " + Date.now() + " write recents=" + root.userState.recents.length + " marker=" + (root.userState.entryMigrated === true) + " sources=" + root.userState.sources.length + " activeKeySet=" + (String(root.userState.activeKey || "") !== ""))  // DH15-LOG
+     stateFile.setText(text)
+   }
+ 
+@@ -2614,13 +2617,15 @@ Item {
+ 
+   function handleProbeExit(text) { return ServiceSources.handleProbeExit(text) }
+ 
+-  function reconcile(force) { return ServiceSources.reconcile(force) }
++  function reconcile(force) { console.log("IPTV-LOG " + Date.now() + " reconcile force=" + (force === true) + " stateLoaded=" + root.stateLoaded + " landedMarker=" + Model.entryMigratedOf(root.landedState) + " reconciled=" + root.reconciled + " playlistSet=" + (String(root.settings.playlistUrl || "") !== ""))  // DH15-LOG
++    return ServiceSources.reconcile(force) }
+ 
+   function stripEntryInputs() { return ServiceSources.stripEntryInputs() }
+ 
+   function reportEntryInput(setting, reason) { return ServiceSources.reportEntryInput(setting, reason) }
+ 
+-  function adoptActive(playlist, epg, plan) { return ServiceSources.adoptActive(playlist, epg, plan) }
++  function adoptActive(playlist, epg, plan) { console.log("IPTV-LOG " + Date.now() + " adoptActive act=" + plan.act + " adoptUrl=" + plan.adoptUrl + " migrating=" + plan.migrating + " playlistSet=" + (String(playlist || "") !== "") + " refused=" + plan.refused.join(","))  // DH15-LOG
++    return ServiceSources.adoptActive(playlist, epg, plan) }
+ 
+   // D-REL-15: adoptActive's deferred persistActive(key), built HERE, on the
+   // root, and never in a code-behind. A function expression made inside a
+@@ -2741,7 +2746,8 @@ Item {
+   // one publish a chmod can raise through the host's file watch meets a run
+   // that changes nothing; and sameOwnWrite already bounds the lagging
+   // host's publish cycle. Pinned through the service harness.
+-  onSettingsChanged: root.reconcile()
++  onSettingsChanged: { console.log("IPTV-LOG " + Date.now() + " settingsChanged " + (function () { var o = []; try { var c = root.shell ? root.shell.barConfig : undefined; var L = c ? c.layout : undefined; var secs = Commons.Util.barSections; for (var i = 0; i < secs.length; i++) { var a = L ? L[secs[i]] : undefined; o.push(secs[i] + "=" + (a === undefined ? "undef" : (Array.isArray(a) ? "array" : (a === null ? "null" : "seq"))) + "(" + (a && a.length !== undefined ? a.length : "-") + ")") } var e = Model.findBarEntry(c, root.pluginId, Commons.Util.barSections); o.push("entry=[" + Object.keys(e || {}).sort().join(",") + "]"); o.push("entryMaxRecents=" + Model.settingsFrom(e).maxRecents) } catch (err) { o.push("threw=" + err) } o.push("boundMaxRecents=" + root.maxRecents); o.push("boundPlaylistSet=" + (String(root.settings.playlistUrl || "") !== "")); return o.join(" ") })())  // DH15-LOG
++    root.reconcile() }
+   // Our own write stands in for the host's value only until the host
+   // reports something else -- its (late) echo of our own value, or a
+   // foreign change such as `omarchy bar set`. Both make the host
+@@ -2826,6 +2832,7 @@ Item {
+   onShellChanged: {
+     // The host injects `shell` after creation; the settings may only be
+     // readable now (the migration needs the active key).
++    console.log("IPTV-LOG " + Date.now() + " shellChanged shell=" + String(root.shell) + " " + (function () { var o = []; try { var c = root.shell ? root.shell.barConfig : undefined; var L = c ? c.layout : undefined; var secs = Commons.Util.barSections; for (var i = 0; i < secs.length; i++) { var a = L ? L[secs[i]] : undefined; o.push(secs[i] + "=" + (a === undefined ? "undef" : (Array.isArray(a) ? "array" : (a === null ? "null" : "seq"))) + "(" + (a && a.length !== undefined ? a.length : "-") + ")") } var e = Model.findBarEntry(c, root.pluginId, Commons.Util.barSections); o.push("entry=[" + Object.keys(e || {}).sort().join(",") + "]"); o.push("entryMaxRecents=" + Model.settingsFrom(e).maxRecents) } catch (err) { o.push("threw=" + err) } o.push("boundMaxRecents=" + root.maxRecents); o.push("boundPlaylistSet=" + (String(root.settings.playlistUrl || "") !== "")); return o.join(" ") })() + " || " + (function () { var o = []; try { var c = root.shell ? root.shell.barConfig : undefined; var L = c ? c.layout : undefined; o.push("cfg=" + typeof c + "/" + Array.isArray(c) + "/" + Object.prototype.toString.call(c)); o.push("layout=" + typeof L + "/" + Array.isArray(L) + "/" + Object.prototype.toString.call(L)); var secs = Commons.Util.barSections; for (var i = 0; i < secs.length; i++) { var a = L ? L[secs[i]] : undefined; if (!a || !a.length) continue; var p = [secs[i] + ":"]; p.push("typeof=" + typeof a); p.push("isArray=" + Array.isArray(a)); p.push("length=" + a.length); p.push("proto=" + Object.prototype.toString.call(a)); try { p.push("index0=" + typeof a[0] + ":" + (a[0] ? a[0].id : "-")) } catch (e1) { p.push("index0Threw=" + e1) } try { var n = 0, f = ""; for (var x of a) { if (n === 0) f = x ? x.id : ""; n++ } p.push("forOf=" + n + ":" + f) } catch (e2) { p.push("forOfThrew=" + e2) } try { var sl = Array.prototype.slice.call(a); p.push("slice=" + Array.isArray(sl) + "(" + sl.length + "):" + (sl[0] ? sl[0].id : "-")) } catch (e3) { p.push("sliceThrew=" + e3) } try { p.push("json=" + JSON.stringify(a, function (k, v) { return (typeof v === "string" && k !== "id") ? "<" + typeof v + ">" : v })) } catch (e4) { p.push("jsonThrew=" + e4) } try { var en = a[0]; var fl = []; for (var k in en) fl.push(k + ":" + typeof en[k]); p.push("fields=" + fl.join(",")); p.push("entryProto=" + Object.prototype.toString.call(en)); p.push("entryIsArray=" + Array.isArray(en)) } catch (e5) { p.push("fieldsThrew=" + e5) } o.push(p.join(" ")) } } catch (err) { o.push("threw=" + err) } return o.join(" | ") })())  // DH15-LOG
+     root.reconcile()
+     root.startCacheLayout()
+   }
+@@ -2848,6 +2855,7 @@ Item {
+     // Argv-only. Creates the private cache/state/runtime dirs before any
+     // FileView write or mpv socket bind can need them (open risk 2), then
+     // state.json itself with mode 0600 (stateInitProc, S-02).
++    console.log("IPTV-LOG " + Date.now() + " created " + String(root))  // DH15-LOG
+     root.startStartupCheck()
+     // D-SINK-18, and it is FIRST among the things that must happen before a
+     // URL can be persisted, not merely early: the shield decides whether a
+@@ -3101,6 +3109,7 @@ Item {
+         // D-SRC-39: decided from the burst record, not the last text alone.
+         var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
+         if (outcome.last) {
++          console.log("IPTV-LOG " + Date.now() + " saved last recents=" + root.lastSaveState.recents.length + " marker=" + (root.lastSaveState.entryMigrated === true) + " sources=" + root.lastSaveState.sources.length)  // DH15-LOG
+           root.stateSavesInFlight = 0
+           root.statePrivateCreated = false   // D-SINK-103: the created file holds our text now
+           root.stateSaveFailed = false

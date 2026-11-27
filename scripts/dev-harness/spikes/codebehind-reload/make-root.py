@@ -2,7 +2,7 @@
 """scripts/dev-harness/spikes/codebehind-reload/make-root.py -- the rig's two
 quickshell roots, built from the HOST'S OWN TEXT.
 
-  make-root.py OUT RIG_BLOCK
+  make-root.py OUT RIG_BLOCK [--bar] [--widgets] [--probe] [--hold-sync]
 
 Copies /usr/share/omarchy/shell to OUT/a/shell and OUT/b/shell and writes, as
 each copy's shell.qml, the host's shell.qml cut to the parts that load, reload,
@@ -50,9 +50,39 @@ ADAPTED, each named on its line in the output with "RIG ADAPTATION":
 The folder watcher (PluginRegistry.localPluginWatcher, inotifywait -m -r on
 the plugins folder, 726-745) and its debounce (shell.qml's 150 ms
 localPluginReloadTimer, 69-73) are the host's, unchanged.
+
+OPTIONS (lane-dh15m, 2026-11-27, for ../barconfig-window/, D-HOST-15). With
+none the output is the same, byte for byte, as without this paragraph.
+  --bar        keeps 242-278 as well: the host's own bar (defaultBarComponent
+               making plugins/bar/Bar.qml, defaultBarLoader, pluginBarLoader),
+               so the bar's widget host asks for a plugin's API in the host's
+               order. Its PanelWindows meet a cage with no layer shell.
+  --widgets    leaves shell.qml 165 as the host wrote it (the first-party
+               folder is the copy's own plugins/) and, in each copy, renames
+               every first-party manifest that does not declare kinds
+               exactly ["bar-widget"] to NAME.rig-off, but plugins/bar's
+               own (omarchy.bar, kind bar), so the scan finds the host's
+               first-party bar widgets -- each a component the shell compiles
+               and registers, and each registration a syncPluginApis -- and
+               no first-party service, overlay, panel or menu.
+  --probe      LOGGING ONLY: inserts a call to the rig block's
+               rigwBeforeApi(key, manifest, where) on its own line above
+               shell.qml 958 (ensureService's `inst.shell = ...`) and above
+               1005 (_syncServices's `kept.shell = ...`), which reads the
+               host's API cache (_pluginShellApis and its descriptors) as
+               createScopedPluginShell is about to, and logs it. The block
+               must define rigwBeforeApi.
+  --hold-sync  THE RED CONTROL: inserts, as syncPluginApis's (886) first
+               statement, a return while the block's rigHoldSync is true, so
+               a service's API keeps the barConfig createObject's property
+               map gave it until the block releases it. The block must
+               define rigHoldSync.
+Each inserted line is named on itself with "RIG ADAPTATION".
 """
 import hashlib
+import json
 import os
+import re
 import shutil
 import sys
 
@@ -69,6 +99,20 @@ FIRST_PARTY_NEW = ("    pluginRegistry.firstPartyDir = shell.home + \"/rig-no-fi
                    "  // RIG ADAPTATION: shell.qml 165\n")
 REAPER = (708, 715)
 REAPER_NEW = "    watcherReaper.command = [\"true\"]  // RIG ADAPTATION: PluginRegistry.qml 708-715\n"
+OPTIONS = ("--bar", "--widgets", "--probe", "--hold-sync")
+BAR = (242, 278)
+# Lines the options insert ABOVE a host line, each held to that line's text.
+PROBE_AT = {
+    958: ("      if (\"shell\" in inst) inst.shell = shell.pluginShellFor(manifest)\n",
+          "      shell.rigwBeforeApi(key, manifest, \"ensureService\")  // RIG ADAPTATION (logging only): above shell.qml 958\n"),
+    1005: ("          if (kept && \"shell\" in kept) kept.shell = shell.pluginShellFor(m)\n",
+           "          shell.rigwBeforeApi(id, m, \"kept\")  // RIG ADAPTATION (logging only): above shell.qml 1005\n"),
+}
+SYNC_AT = 886
+SYNC_OLD = "  function syncPluginApis() {\n"
+SYNC_NEW = ("    if (shell.rigHoldSync === true) { shell.rigNote(\"syncPluginApis held\"); return }"
+            "  // RIG ADAPTATION (red control): shell.qml 886\n")
+WIDGET_ONLY = ["bar-widget"]
 
 
 def lines_of(rel):
@@ -82,9 +126,20 @@ def lines_of(rel):
     return data.decode("utf-8").splitlines(keepends=True)
 
 
-def root_text(shell, block, pragma):
+def keep_ranges(opts):
+    if "--bar" not in opts:
+        return KEEP
     out = []
     for first, last in KEEP:
+        out.append((first, last))
+        if last == BAR[0] - 1:
+            out.append(BAR)
+    return tuple(out)
+
+
+def root_text(shell, block, pragma, opts=()):
+    out = []
+    for first, last in keep_ranges(opts):
         for n in range(first, last + 1):
             line = shell[n - 1]
             if n == 1 and not pragma:
@@ -92,17 +147,51 @@ def root_text(shell, block, pragma):
             if n == 165:
                 if line != FIRST_PARTY_OLD:
                     raise SystemExit("make-root.py: shell.qml 165 is not the line this adapts")
-                line = FIRST_PARTY_NEW
+                if "--widgets" not in opts:
+                    line = FIRST_PARTY_NEW
+            if "--probe" in opts and n in PROBE_AT:
+                if line != PROBE_AT[n][0]:
+                    raise SystemExit("make-root.py: shell.qml %d is not the line --probe goes above" % n)
+                out.append(PROBE_AT[n][1])
             out.append(line)
+            if "--hold-sync" in opts and n == SYNC_AT:
+                if line != SYNC_OLD:
+                    raise SystemExit("make-root.py: shell.qml %d is not syncPluginApis's first line" % n)
+                out.append(SYNC_NEW)
     out.append(block)
     out.append(shell[CLOSE - 1])
     return "".join(out)
 
 
+def widgets_only(plugins_dir):
+    """--widgets: rename, under a copy's plugins/, every first-party manifest
+    whose kinds are not exactly ["bar-widget"] (plugins/bar's own excepted),
+    as the scan finds them (find -mindepth 2 -maxdepth 3, manifest.json or
+    *.manifest.json). Returns the ids kept and the ids switched off."""
+    kept, off = [], []
+    for dirpath, dirnames, filenames in os.walk(plugins_dir):
+        depth = os.path.relpath(dirpath, plugins_dir).count(os.sep) + 1
+        if dirpath == plugins_dir or depth > 2:
+            continue
+        for name in sorted(filenames):
+            if name != "manifest.json" and not name.endswith(".manifest.json"):
+                continue
+            path = os.path.join(dirpath, name)
+            with open(path, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            if manifest.get("kinds") == WIDGET_ONLY or (manifest.get("id") == "omarchy.bar"
+                                                        and os.path.relpath(path, plugins_dir) == "bar/manifest.json"):
+                kept.append(manifest.get("id"))
+            else:
+                os.rename(path, path + ".rig-off")
+                off.append(manifest.get("id"))
+    return sorted(kept), sorted(off)
+
+
 def main(argv):
-    if len(argv) != 3:
-        raise SystemExit("usage: make-root.py OUT RIG_BLOCK")
-    out, block_path = argv[1], argv[2]
+    if len(argv) < 3 or any(a not in OPTIONS for a in argv[3:]) or len(set(argv[3:])) != len(argv[3:]):
+        raise SystemExit("usage: make-root.py OUT RIG_BLOCK [--bar] [--widgets] [--probe] [--hold-sync]")
+    out, block_path, opts = argv[1], argv[2], tuple(argv[3:])
     if os.path.exists(out):
         raise SystemExit("make-root.py: %s exists; refusing to reuse it" % out)
     shell = lines_of("shell.qml")
@@ -114,12 +203,19 @@ def main(argv):
         raise SystemExit("make-root.py: PluginRegistry.qml %d-%d is not the reaper's command" % REAPER)
     with open(block_path, encoding="utf-8") as fh:
         block = fh.read()
+    for opt, name in (("--probe", "rigwBeforeApi"), ("--hold-sync", "rigHoldSync")):
+        if opt in opts and not re.search(r"\b(function|property bool) %s\b" % name, block):
+            raise SystemExit("make-root.py: %s needs a block that defines %s" % (opt, name))
     registry_text = "".join(registry[:REAPER[0] - 1] + [REAPER_NEW] + registry[REAPER[1]:])
     for name, pragma in (("a", True), ("b", False)):
         dest = os.path.join(out, name, "shell")
         shutil.copytree(HOST, dest, symlinks=True)
         with open(os.path.join(dest, "shell.qml"), "w", encoding="utf-8") as fh:
-            fh.write(root_text(shell, block, pragma))
+            fh.write(root_text(shell, block, pragma, opts))
+        if "--widgets" in opts:
+            kept, off = widgets_only(os.path.join(dest, "plugins"))
+            with open(os.path.join(out, name, "widgets.json"), "w", encoding="utf-8") as fh:
+                json.dump({"kept": kept, "off": off}, fh, indent=1)
         with open(os.path.join(dest, "services", "PluginRegistry.qml"), "w", encoding="utf-8") as fh:
             fh.write(registry_text)
         # The host's defaults, where defaultsFile (shell.qml 134-145) reads

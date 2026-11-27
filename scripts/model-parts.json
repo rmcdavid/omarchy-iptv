@@ -384,6 +384,8 @@
         "warningLine",
         "footerWarning",
         "BAR_SECTIONS",
+        "hostList",
+        "hostEntryCopy",
         "barSectionList",
         "findBarEntry",
         "settingOf",

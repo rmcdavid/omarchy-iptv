@@ -3735,4 +3735,102 @@ TestCase {
             ["string", true, true, "model/build.mjs", [], "", "restart", "cache", "[\"Service-pip.js\"]", "[\"__proto__\"]",
              "", "cache", "restart"])
   }
+
+  // D-HOST-15 (P2): the bar config as a FRESH PluginShellApi carries it, on
+  // V4's own wrappers. The host makes that object with
+  // `pluginShellApiComponent.createObject(null, { ..., barConfig:
+  // shell.publicBarConfig() })` (shell.qml 633-638) over a QtObject whose
+  // `property var barConfig: ({})` is this one's (services/PluginShellApi.qml
+  // 17), and until its next syncPluginApis assigns a parsed copy from script
+  // (904) the service reads Qt's wrappers back: each section a V4Sequence
+  // that Array.isArray refuses (measured in the host's own shell.qml by
+  // lane-dh15m, 2026-11-27). The premise is asserted here too, so a Qt that
+  // stops making the sequence turns this red and the reading is re-measured.
+  // The reading: the entry is found and copied, its settings read, the gate
+  // lets an own write through, and the write the funnel composes over it
+  // (retiredInputsToKeep, entryWith) carries every field; after the script
+  // assignment the Array reads the same. Red on 27e2a84 (the entry read as
+  // absent, the defaults, the write refused). What the wrapped entry itself
+  // answers to the readings the copy spares it is logged, not asserted. Its
+  // fields come back in the map's own order, the keys sorted (a QVariantMap),
+  // not shell.json's, so a write composed in the window stores the entry's
+  // keys sorted: the host's dirty check then reads a change, once.
+  Component {
+    id: freshShellApi
+    QtObject { property var barConfig: ({}) }
+  }
+  function test_freshApiBarConfigInV4() {
+    var pid = "io.github.rmcdavid.iptv"
+    var sections = ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+    var plain = { layout: { left: [], centerBegin: [], center: [{ id: "omarchy.clock" }], centerEnd: [],
+                            right: [{ id: "omarchy.tray" }, { id: pid, playlistUrl: "http://a.example.test/list.m3u", maxRecents: 25, refreshMinutes: 120, user_note: "kept" }] } }
+    var api = freshShellApi.createObject(null, { barConfig: JSON.parse(JSON.stringify(plain)) })
+    var right = api.barConfig.layout.right
+    var premise = [Array.isArray(right), Object.prototype.toString.call(right), right.length, Object.prototype.toString.call(right[1])]
+    var wrapped = right[1]
+    var asks = []
+    try { asks.push("hasOwnProperty(id)=" + Object.prototype.hasOwnProperty.call(wrapped, "id")) } catch (e1) { asks.push("hasOwnProperty threw " + e1) }
+    try { asks.push("Object.keys=" + Object.keys(wrapped).sort().join(",")) } catch (e2) { asks.push("Object.keys threw " + e2) }
+    try { asks.push("absent key=" + typeof wrapped.pipCorner) } catch (e3) { asks.push("absent key threw " + e3) }
+    try { asks.push("in=" + ("id" in wrapped)) } catch (e4) { asks.push("in threw " + e4) }
+    try { asks.push("forEach=" + typeof right.forEach) } catch (e5) { asks.push("forEach threw " + e5) }
+    try { asks.push("past the end=" + typeof right[2]) } catch (e6) { asks.push("past the end threw " + e6) }
+    console.log("D-HOST-15: the wrapped entry and its sequence in V4: " + asks.join("; "))
+    var found = Model.findBarEntry(api.barConfig, pid, sections)
+    var s = Model.settingsFrom(found)
+    var read = [Object.getPrototypeOf(found) === Object.prototype, Object.keys(found).sort().join(","), s.playlistUrl, s.maxRecents, s.refreshMinutes,
+                found.user_note, Model.barEntryWritable(api.barConfig, pid, sections)]
+    var entry = Model.entryWith(found, { sourceKey: "0123abcd" }, { keep: Model.retiredInputsToKeep(found, false, null) })
+    var composed = JSON.stringify(entry)
+    api.barConfig = JSON.parse(JSON.stringify(plain))
+    var closed = [Array.isArray(api.barConfig.layout.right), Model.settingsFrom(Model.findBarEntry(api.barConfig, pid, sections)).maxRecents,
+                  Model.barEntryWritable(api.barConfig, pid, sections)]
+    api.destroy()
+    // A shell.json entry holding a `__proto__` key, parsed as the host's
+    // publicBarConfig parses it. V4 makes it, through the map, a wrapper with
+    // no own field whose prototype holds the entry's fields merged with the
+    // nested object's (logged), so the first reading's for...in copy took
+    // `polluted` as a setting (the code recheck of 616061f). Read through the
+    // JSON copy it is no entry in the window -- nothing of the nested object
+    // read, not writable -- and the Array after it holds the entry with an
+    // own `__proto__` key that reads no nested field. An entry whose id only
+    // its `__proto__` holds is not the plugin's in either form.
+    var oddText = "{\"layout\":{\"right\":[{\"id\":\"" + pid + "\",\"__proto__\":{\"polluted\":true},\"maxRecents\":25}]}}"
+    var idOnlyText = "{\"layout\":{\"right\":[{\"__proto__\":{\"id\":\"" + pid + "\"},\"maxRecents\":5}]}}"
+    var odd = freshShellApi.createObject(null, { barConfig: JSON.parse(oddText) })
+    var oddWrapped = odd.barConfig.layout.right[0]
+    console.log("D-HOST-15: an entry holding __proto__ in V4, through the map: own keys [" + Object.keys(oddWrapped).join(",") + "], JSON "
+                + JSON.stringify(oddWrapped) + ", its prototype's own keys [" + Object.getOwnPropertyNames(Object.getPrototypeOf(oddWrapped)).join(",")
+                + "], polluted reads " + oddWrapped.polluted)
+    var oddFound = Model.findBarEntry(odd.barConfig, pid, sections)
+    var inWindow = [Object.keys(oddFound).join(","), String(oddFound.polluted), Model.settingsFrom(oddFound).maxRecents, Model.barEntryWritable(odd.barConfig, pid, sections)]
+    odd.barConfig = JSON.parse(oddText)
+    var oddArray = Model.findBarEntry(odd.barConfig, pid, sections)
+    var afterWindow = [Object.keys(oddArray).sort().join(","), String(oddArray.polluted), Model.settingsFrom(oddArray).maxRecents, Model.barEntryWritable(odd.barConfig, pid, sections)]
+    odd.destroy()
+    var idOnly = freshShellApi.createObject(null, { barConfig: JSON.parse(idOnlyText) })
+    var idOnlyRead = [String(Model.findBarEntry(idOnly.barConfig, pid, sections).id), Model.barEntryWritable(idOnly.barConfig, pid, sections)]
+    idOnly.barConfig = JSON.parse(idOnlyText)
+    idOnlyRead.push(String(Model.findBarEntry(idOnly.barConfig, pid, sections).id), Model.barEntryWritable(idOnly.barConfig, pid, sections))
+    idOnly.destroy()
+    // A nested list and object inside an entry, and keys named as
+    // Object.prototype's members: the copy in the window reads them as the
+    // Array after it does -- a list an Array, not V4's nested wrapper (the
+    // first reading's copy handed that wrapper on and skipped `constructor`).
+    var nestedText = "{\"layout\":{\"right\":[{\"id\":\"" + pid + "\",\"mpvList\":[\"--a\",\"--b\"],\"obj\":{\"k\":1},\"nul\":null,\"constructor\":\"c\",\"toJSON\":\"t\",\"maxRecents\":25}]}}"
+    var nested = freshShellApi.createObject(null, { barConfig: JSON.parse(nestedText) })
+    function nestedRead(e) { return [Array.isArray(e.mpvList), String(e.mpvList), typeof e.obj, e.obj ? e.obj.k : "-", String(e.nul), String(e.constructor), String(e.toJSON), e.maxRecents] }
+    var nestedWindow = nestedRead(Model.findBarEntry(nested.barConfig, pid, sections))
+    nested.barConfig = JSON.parse(nestedText)
+    var nestedAfter = nestedRead(Model.findBarEntry(nested.barConfig, pid, sections))
+    nested.destroy()
+    compare([inWindow, afterWindow, idOnlyRead, nestedWindow, nestedAfter],
+            [["", "undefined", 10, false], ["__proto__,id,maxRecents", "undefined", 25, true], ["undefined", false, "undefined", false],
+             [true, "--a,--b", "object", 1, "null", "c", "t", 25], [true, "--a,--b", "object", 1, "null", "c", "t", 25]])
+    compare([premise, read, composed, closed],
+            [[false, "[object V4Sequence]", 2, "[object V4ReferenceObject]"],
+             [true, "id,maxRecents,playlistUrl,refreshMinutes,user_note", "http://a.example.test/list.m3u", 25, 120, "kept", true],
+             "{\"id\":\"io.github.rmcdavid.iptv\",\"maxRecents\":25,\"playlistUrl\":\"http://a.example.test/list.m3u\",\"refreshMinutes\":120,\"user_note\":\"kept\",\"sourceKey\":\"0123abcd\"}",
+             [true, 25, true]])
+  }
 }
