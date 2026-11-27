@@ -3787,20 +3787,46 @@ TestCase {
                   Model.barEntryWritable(api.barConfig, pid, sections)]
     api.destroy()
     // A shell.json entry holding a `__proto__` key, parsed as the host's
-    // publicBarConfig parses it: whatever V4's JSON.parse and the map make of
-    // it (logged), the copy keeps Object.prototype as its prototype, because
-    // Object.prototype holds the `__proto__` accessor and the copy skips
-    // every key it holds.
+    // publicBarConfig parses it. V4 makes it, through the map, a wrapper with
+    // no own field whose prototype holds the entry's fields merged with the
+    // nested object's (logged), so the first reading's for...in copy took
+    // `polluted` as a setting (the code recheck of 616061f). Read through the
+    // JSON copy it is no entry in the window -- nothing of the nested object
+    // read, not writable -- and the Array after it holds the entry with an
+    // own `__proto__` key that reads no nested field. An entry whose id only
+    // its `__proto__` holds is not the plugin's in either form.
     var oddText = "{\"layout\":{\"right\":[{\"id\":\"" + pid + "\",\"__proto__\":{\"polluted\":true},\"maxRecents\":25}]}}"
+    var idOnlyText = "{\"layout\":{\"right\":[{\"__proto__\":{\"id\":\"" + pid + "\"},\"maxRecents\":5}]}}"
     var odd = freshShellApi.createObject(null, { barConfig: JSON.parse(oddText) })
+    var oddWrapped = odd.barConfig.layout.right[0]
+    console.log("D-HOST-15: an entry holding __proto__ in V4, through the map: own keys [" + Object.keys(oddWrapped).join(",") + "], JSON "
+                + JSON.stringify(oddWrapped) + ", its prototype's own keys [" + Object.getOwnPropertyNames(Object.getPrototypeOf(oddWrapped)).join(",")
+                + "], polluted reads " + oddWrapped.polluted)
     var oddFound = Model.findBarEntry(odd.barConfig, pid, sections)
-    var copied = [Object.prototype.hasOwnProperty.call(Object.prototype, "__proto__"), Object.getPrototypeOf(oddFound) === Object.prototype, oddFound.maxRecents]
+    var inWindow = [Object.keys(oddFound).join(","), String(oddFound.polluted), Model.settingsFrom(oddFound).maxRecents, Model.barEntryWritable(odd.barConfig, pid, sections)]
     odd.barConfig = JSON.parse(oddText)
     var oddArray = Model.findBarEntry(odd.barConfig, pid, sections)
-    console.log("D-HOST-15: an entry holding __proto__ in V4: the copy's own keys " + Object.keys(oddFound).sort().join(",") + "; the Array path's own keys "
-                + Object.keys(oddArray).sort().join(",") + ", its prototype Object.prototype " + (Object.getPrototypeOf(oddArray) === Object.prototype) + ", polluted reads " + oddArray.polluted)
+    var afterWindow = [Object.keys(oddArray).sort().join(","), String(oddArray.polluted), Model.settingsFrom(oddArray).maxRecents, Model.barEntryWritable(odd.barConfig, pid, sections)]
     odd.destroy()
-    compare(copied, [true, true, 25])
+    var idOnly = freshShellApi.createObject(null, { barConfig: JSON.parse(idOnlyText) })
+    var idOnlyRead = [String(Model.findBarEntry(idOnly.barConfig, pid, sections).id), Model.barEntryWritable(idOnly.barConfig, pid, sections)]
+    idOnly.barConfig = JSON.parse(idOnlyText)
+    idOnlyRead.push(String(Model.findBarEntry(idOnly.barConfig, pid, sections).id), Model.barEntryWritable(idOnly.barConfig, pid, sections))
+    idOnly.destroy()
+    // A nested list and object inside an entry, and keys named as
+    // Object.prototype's members: the copy in the window reads them as the
+    // Array after it does -- a list an Array, not V4's nested wrapper (the
+    // first reading's copy handed that wrapper on and skipped `constructor`).
+    var nestedText = "{\"layout\":{\"right\":[{\"id\":\"" + pid + "\",\"mpvList\":[\"--a\",\"--b\"],\"obj\":{\"k\":1},\"nul\":null,\"constructor\":\"c\",\"toJSON\":\"t\",\"maxRecents\":25}]}}"
+    var nested = freshShellApi.createObject(null, { barConfig: JSON.parse(nestedText) })
+    function nestedRead(e) { return [Array.isArray(e.mpvList), String(e.mpvList), typeof e.obj, e.obj ? e.obj.k : "-", String(e.nul), String(e.constructor), String(e.toJSON), e.maxRecents] }
+    var nestedWindow = nestedRead(Model.findBarEntry(nested.barConfig, pid, sections))
+    nested.barConfig = JSON.parse(nestedText)
+    var nestedAfter = nestedRead(Model.findBarEntry(nested.barConfig, pid, sections))
+    nested.destroy()
+    compare([inWindow, afterWindow, idOnlyRead, nestedWindow, nestedAfter],
+            [["", "undefined", 10, false], ["__proto__,id,maxRecents", "undefined", 25, true], ["undefined", false, "undefined", false],
+             [true, "--a,--b", "object", 1, "null", "c", "t", 25], [true, "--a,--b", "object", 1, "null", "c", "t", 25]])
     compare([premise, read, composed, closed],
             [[false, "[object V4Sequence]", 2, "[object V4ReferenceObject]"],
              [true, "id,maxRecents,playlistUrl,refreshMinutes,user_note", "http://a.example.test/list.m3u", 25, 120, "kept", true],

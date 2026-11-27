@@ -647,7 +647,11 @@ var BAR_SECTIONS = ["left", "center", "right"]
 // that merely has one is no section, and the host's own readers take an
 // Array and nothing else (Util.qml's normalizeLayoutSection). A tag that a
 // later Qt renames reads as absent, which is what every Qt before this
-// reading did. -> the list to walk, or null.
+// reading did. The length must be a whole number of items, at least 0: a
+// tagged object with a negative one is refused, so the host's list of
+// sections falls back to 4.0.x's three rather than to none, and a length
+// that is not a number is refused before anything coerces it (its valueOf
+// never runs). -> the list to walk, or null.
 function hostList(value) {
   if (Array.isArray(value)) return value
   if (value === null || typeof value !== "object") return null
@@ -656,29 +660,33 @@ function hostList(value) {
   return typeof n === "number" && isFinite(n) && n >= 0 && Math.floor(n) === n ? value : null
 }
 
-// D-HOST-15. An entry found in a sequence is a V4ReferenceObject, and it is
-// COPIED here, field by field, through the two things the host's own wrapper
-// was seen to answer: for...in, which listed exactly the entry's fields, and
-// a read of each. So nothing downstream asks the wrapper anything more --
-// hasOwnProperty (retiredInputsToKeep, entryWith), a key it lacks
-// (settingOf), a write -- and every caller gets a plain object, as it does
-// from the Array the host assigns later. (The same wrapper made in
-// qmltestrunner answered those too; the QML spec logs it.) Own keys only, as
-// entryWith reads its source, without hasOwnProperty: a key Object.prototype
-// itself holds is skipped -- one a polluted prototype lent every object
-// (D-SG-3), `constructor`, and `__proto__`, whose accessor it holds in V8 and
-// in V4 alike (the spec asserts it), so a key of that name cannot set the
-// copy's prototype. The fields come in the wrapper's order, a QVariantMap's,
-// sorted by key. A value is copied as it reads; the plugin's settings are
-// strings, numbers and booleans, and a nested list or object (a hand-edited
-// shell.json) is not what the measurement read.
+// D-HOST-15. An item of a sequence that is an object is a V4ReferenceObject,
+// and it is read here the way the host itself reads the bar config it hands
+// over a moment later: JSON.parse(JSON.stringify(...)), publicBarConfig's
+// own reading (shell.qml 341). JSON.stringify is what the host's process was
+// seen to answer over the wrapper (lane-dh15m logged the section's JSON
+// text, the entry's fields in it); it reads the wrapper's OWN fields and
+// nothing it inherits, and the copy is a plain object of plain values -- a
+// nested list comes back an Array -- so nothing downstream asks the wrapper
+// anything (hasOwnProperty, a key it lacks, a write), and every caller gets
+// the shape the Array after the window gives it. The walkers match the id
+// on the COPY, never on the wrapper.
+//
+// Not for...in, which the first reading used (lane-dh15fix): an entry whose
+// shell.json text holds a `__proto__` key reaches the service as a wrapper
+// with NO own field, whose PROTOTYPE holds the entry's fields merged with
+// the nested object's (measured in qmltestrunner on Qt 6.12.0, the host's
+// Qt, lane-dh15fix2, 2026-11-27; the code recheck of 616061f read it in the
+// spec's log first). for...in walks that prototype, so that copy took the
+// nested object's fields as settings, and a read of the wrapper's `id`
+// matched an id found only inside such a `__proto__`. Through JSON that
+// entry has no field: it reads as absent in the window (the defaults, the
+// write refused, as every entry read before this reading), where the Array
+// after it holds the entry with an own `__proto__` key that entryWith
+// drops. A wrapper JSON cannot read (it throws) is no entry.
+// -> a plain value, or null.
 function hostEntryCopy(entry) {
-  var out = {}
-  for (var k in entry) {
-    if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue
-    out[k] = entry[k]
-  }
-  return out
+  try { return JSON.parse(JSON.stringify(entry)) } catch (e) { return null }
 }
 
 // The sections both walkers walk: the host's list when it hands one (its
@@ -697,8 +705,8 @@ function barSectionList(sections) {
 // Our inline settings live on the bar layout entry (shell.json bar.layout.*).
 // Returns the entry object or {} so callers can read keys with fallbacks.
 // `sections` is the host's Util.barSections (barSectionList above).
-// D-HOST-15: a section in the sequence form is walked (hostList), and the
-// entry found in one is handed back as a plain copy (hostEntryCopy).
+// D-HOST-15: a section in the sequence form is walked (hostList), each object
+// in it read as its plain copy (hostEntryCopy), and the id matched on that.
 function findBarEntry(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return {}
@@ -710,7 +718,8 @@ function findBarEntry(barConfig, pluginId, sections) {
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i]
       if (typeof entry === "string" && entry === id) return { id: id }
-      if (entry && typeof entry === "object" && str(entry.id) === id) return wrapped ? hostEntryCopy(entry) : entry
+      if (wrapped && entry && typeof entry === "object") entry = hostEntryCopy(entry)
+      if (entry && typeof entry === "object" && str(entry.id) === id) return entry
     }
   }
   return {}
@@ -1108,10 +1117,11 @@ function ownedEntryPatch(effective, overrides) {
 // which is success (the host already stores what we asked for).
 // D-HOST-11: over the same `sections` as findBarEntry, from the same
 // barSectionList; a caller passes both walkers the one list it holds.
-// D-HOST-15: and over the same reading of a section (hostList), so an entry
-// the service reads from a fresh API's sequence is one it may write; the
-// write goes to the host's updateEntryInline, which walks the host's own
-// config, never this object.
+// D-HOST-15: and over the same reading of a section (hostList) and of an
+// object in a sequence (hostEntryCopy, the id matched on the copy), so an
+// entry the service reads from a fresh API's sequence is one it may write,
+// and one it reads as absent there is not; the write goes to the host's
+// updateEntryInline, which walks the host's own config, never this object.
 function barEntryWritable(barConfig, pluginId, sections) {
   var id = str(pluginId)
   if (!barConfig || typeof barConfig !== "object" || !barConfig.layout || typeof barConfig.layout !== "object") return false
@@ -1119,8 +1129,10 @@ function barEntryWritable(barConfig, pluginId, sections) {
   for (var s = 0; s < sections.length; s++) {
     var entries = hostList(barConfig.layout[sections[s]])
     if (entries === null) continue
+    var wrapped = !Array.isArray(entries)
     for (var i = 0; i < entries.length; i++) {
       var entry = entries[i]
+      if (wrapped && entry && typeof entry === "object") entry = hostEntryCopy(entry)
       if (entry && typeof entry === "object" && str(entry.id) === id) return true
     }
   }

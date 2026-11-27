@@ -860,7 +860,17 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # form, the copy's prototype) and the service's state load in that form; 10
 # of the 13 red on 27e2a84, all 13 green, each of 12 one-decision mutants
 # red; the suite runs 4188.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4188}
+# 2026-11-27, lane-dh15fix2 (D-HOST-15, the rechecks of 616061f): 4188 ->
+# 4189 -- the copy is the host's own JSON reading and the id is matched on
+# it: the doubles answer JSON.stringify of an entry and carry V4's form of
+# an entry holding __proto__ (no own field, its fields on its prototype),
+# which reads as absent in the window, an id only that prototype holds is
+# not the plugin's, an unreadable item is passed over, keys named as
+# Object.prototype's members read as the Array form does, a negative
+# tagged length falls back to 4.0.x's sections and a length that is no
+# number is never coerced; 2 of the 14 red on 616061f, 11 on 27e2a84,
+# each of 18 one-decision mutants red; the suite runs 4189.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4189}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1526,7 +1536,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4188}
 # shapes the runs printed; red first (8 run, 1 failure, 2 errors) and on nine
 # one-decision mutants (QA-RESULTS "D-HOST-15: the barConfig window on the
 # host's own order").
-PY_TESTS_MIN=${PY_TESTS_MIN:-3143}
+# 2026-11-27, lane-dh15fix2 (D-HOST-15): 3143 -> 3146 -- the readout's
+# load that reads no Array is never `after`, the FIRST load is judged, and
+# only the handed object's assignment closes the window; red on 616061f's
+# analyzer (1 failure) and on the two mutants the code recheck found
+# surviving (1 failure each).
+PY_TESTS_MIN=${PY_TESTS_MIN:-3146}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -27193,11 +27193,20 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
 // entry lacks, a write, a define, a delete, hasOwnProperty or Object.keys over
 // an entry (node 26's for...in over a proxy asks ownKeys, then getPrototypeOf,
 // then one descriptor per key as it goes; the entry answers descriptors only
-// in that order, which the double's own check pins). JSON.stringify, which
-// the measurement saw give array text, is refused rather than mimicked.
+// in that order, which the double's own check pins). JSON.stringify of an
+// ENTRY is answered, as the host's JSON.stringify of a section made of each
+// entry in it: node asks its toJSON (read as absent), then ownKeys, then one
+// descriptor per key, and the entry answers descriptors in that order only
+// after that toJSON read. JSON.stringify of a SEQUENCE, which the
+// measurement saw give array text, is refused rather than mimicked (a proxy
+// cannot be an Array to JSON and not to Array.isArray). And an entry whose
+// shell.json text holds a `__proto__` key is the form V4 makes of it (below:
+// no own field, a prototype holding the fields), measured in qmltestrunner on
+// the host's Qt rather than in the host's process.
 // IPTV_MODEL and IPTV_SERVICE_QML point the block at another tree. Red on
 // 27e2a84; the mutants are in QA-RESULTS "D-HOST-15: the fix at the reading
-// (lane-dh15fix, 2026-11-27)".
+// (lane-dh15fix, 2026-11-27)", and those of the JSON copy and the
+// `__proto__` form in its bracket of lane-dh15fix2's.
 ;(function () {
   const util = require("util")
   const H = require("./service-harness.js")
@@ -27209,27 +27218,43 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const refuse = (what, key) => { throw new Error("V4 double: " + what + " " + String(key) + " was not measured") }
   const own = (o, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k)
   // A V4ReferenceObject over `fields`. `absent` says whether a key it lacks
-  // reads as undefined (the layout: tray was read so) or throws.
-  const refObject = (fields, absent) => {
-    let staged = null, listing = null
-    return new Proxy({}, {
+  // reads as undefined (the layout: tray was read so) or throws. `proto`,
+  // another such double, is its prototype: a read the wrapper lacks goes on
+  // to it, and for...in walks it (protoForm below).
+  const fieldsOf = new WeakMap()
+  const refObject = (fields, absent, proto) => {
+    let staged = null, listing = null, json = false
+    const lends = key => proto !== undefined && own(fieldsOf.get(proto), key)
+    const wrapper = new Proxy({}, {
       get(t, key) {
         if (key === Symbol.toStringTag) return "V4ReferenceObject"
+        // JSON.stringify's first ask of an object; what it asks next is
+        // answered only after it.
+        if (key === "toJSON") { json = true; return own(fields, key) ? fields[key] : undefined }
         if (own(fields, key)) return fields[key]
+        if (lends(key)) return proto[key]
         if (absent === true && typeof key === "string") return undefined
         return refuse("a read of", key)
       },
-      ownKeys() { staged = Object.keys(fields); return staged.slice() },
-      getPrototypeOf() { if (staged !== null) { listing = staged; staged = null } return Object.prototype },
+      ownKeys() {
+        const keys = Object.keys(fields)
+        if (json) { json = false; listing = keys.length ? keys.slice() : null } else staged = keys
+        return keys.slice()
+      },
+      getPrototypeOf() {
+        if (staged !== null) { listing = staged.length ? staged : null; staged = null }
+        return proto !== undefined ? proto : Object.prototype
+      },
       getOwnPropertyDescriptor(t, key) {
         if (listing !== null && listing[0] === key) {
           listing.shift()
           if (listing.length === 0) listing = null
           return { value: fields[key], writable: true, enumerable: true, configurable: true }
         }
-        // for...in then asks whether the wrapper shadows each key the
-        // prototype lends (a polluted Object.prototype's): it does not.
-        if (!own(fields, key) && typeof key === "string" && Object.prototype.propertyIsEnumerable.call(Object.prototype, key)) return undefined
+        // for...in then asks whether the wrapper shadows each key its
+        // prototype lends (protoForm's, or a polluted Object.prototype's):
+        // it does not.
+        if (!own(fields, key) && (lends(key) || (typeof key === "string" && Object.prototype.propertyIsEnumerable.call(Object.prototype, key)))) return undefined
         staged = null
         return refuse("a property descriptor (hasOwnProperty, Object.keys) of", key)
       },
@@ -27238,7 +27263,21 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
       defineProperty(t, key) { return refuse("a define of", key) },
       deleteProperty(t, key) { return refuse("a delete of", key) }
     })
+    fieldsOf.set(wrapper, fields)
+    return wrapper
   }
+  // An entry whose shell.json text holds a `__proto__` key, as V4 makes it
+  // when it crosses createObject's property map (qmltestrunner on Qt 6.12.0,
+  // the host's Qt, lane-dh15fix2's probe, 2026-11-27): a wrapper with NO own
+  // field -- Object.keys and getOwnPropertyNames empty, JSON.stringify `{}`
+  // -- whose prototype, another V4ReferenceObject, holds the entry's fields
+  // merged with the nested object's. `{"id":<ours>,"__proto__":{"polluted":
+  // true,"id":"x"},"maxRecents":25}` read id (ours), polluted (true) and
+  // maxRecents (25) through it, for...in listing them in that order;
+  // `{"__proto__":{"id":<ours>},"maxRecents":5}` read our id and 5. The
+  // Array form (after syncPluginApis' JSON.parse) holds `__proto__` as an
+  // own key instead and reads neither the nested fields nor a nested id.
+  const protoForm = (merged) => refObject({}, false, refObject(merged))
   // A V4Sequence over `items`.
   const sequence = (items) => {
     const n = items.length
@@ -27293,7 +27332,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // The doubles are the wrappers as measured: what was seen answered is
   // answered, and what was not is refused -- checked here, so a node whose
   // proxy order changes turns THIS red rather than making the double kind.
-  checkCall("D-HOST-15 (the doubles, rule 10): the sequence and the entry answer what the host's were measured to answer, and refuse the rest", () => {
+  checkCall("D-HOST-15 (the doubles, rule 10): the sequence and the entry answer what the host's were measured to answer, the __proto__ form what V4 answered for it on the host's Qt, and they refuse the rest", () => {
     const e = refObject({ id: PID, maxRecents: 25 })
     const q = sequence([e])
     const tries = (f) => { try { f(); return "answered" } catch (err) { return /was not measured/.test(err.message) ? "refused" : "threw " + err.message } }
@@ -27302,14 +27341,20 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     let n = 0
     for (const x of q) if (x === e) n++
     const sl = Array.prototype.slice.call(q)
+    const w = protoForm({ id: PID, polluted: true, maxRecents: 25 })
+    const wListed = []
+    for (const k in w) wListed.push(k + ":" + typeof w[k])
     return { seq: [typeof q, Array.isArray(q), Object.prototype.toString.call(q), q.length, q[0] === e, n, Array.isArray(sl) && sl.length === 1 && sl[0] === e],
-             entry: [typeof e, Array.isArray(e), Object.prototype.toString.call(e), e.id, listed],
+             entry: [typeof e, Array.isArray(e), Object.prototype.toString.call(e), e.id, listed, JSON.stringify(e), JSON.stringify(e)],
+             protoForm: [Object.prototype.toString.call(w), w.id, w.polluted, wListed, JSON.stringify(w), Object.getPrototypeOf(w) === Object.prototype,
+                         Object.keys(w).length, tries(() => w.pipCorner)],
              layout: [Object.prototype.toString.call(fresh({ layout: { right: [] } }).layout), fresh({ layout: { right: [] } }).layout.tray],
              refused: [tries(() => q.forEach(() => 0)), tries(() => q[1]), tries(() => q.indexOf(e)), tries(() => JSON.stringify(q)), tries(() => "length" in q),
                        tries(() => { q[0] = 1 }), tries(() => e.pipCorner), tries(() => Object.prototype.hasOwnProperty.call(e, "id")), tries(() => Object.keys(e)),
                        tries(() => { e.id = "x" }), tries(() => delete e.id), tries(() => "id" in e)] }
   }, { seq: ["object", false, "[object V4Sequence]", 1, true, 1, true],
-       entry: ["object", false, "[object V4ReferenceObject]", PID, ["id:string", "maxRecents:number"]],
+       entry: ["object", false, "[object V4ReferenceObject]", PID, ["id:string", "maxRecents:number"], "{\"id\":\"" + PID + "\",\"maxRecents\":25}", "{\"id\":\"" + PID + "\",\"maxRecents\":25}"],
+       protoForm: ["[object V4ReferenceObject]", PID, true, ["id:string", "polluted:boolean", "maxRecents:number"], "{}", false, 0, "refused"],
        layout: ["[object V4ReferenceObject]", undefined],
        refused: ["refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused", "refused"] })
 
@@ -27340,40 +27385,78 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   checkCall("D-HOST-15: a section that is neither an Array nor the V4Sequence -- an object with a numeric length, a wrapper of another kind, a sequence-tagged object with a broken length, text -- is refused: not found, not writable", () => {
     const e = { id: PID, maxRecents: 25 }
     const tagged = (length) => { const o = { 0: e, length }; Object.defineProperty(o, Symbol.toStringTag, { value: "V4Sequence" }); return o }
+    // A length that is no number is refused before anything coerces it:
+    // its valueOf never runs.
+    let coerced = 0
     const shapes = { lengthy: { 0: e, length: 1 }, otherWrapper: refObject({ 0: e, length: 1 }, true), args: (function () { return arguments })(e),
                      typed: new Uint8Array(1), text: PID, number: 1,
-                     tagNaN: tagged(NaN), tagNegative: tagged(-1), tagFraction: tagged(0.5), tagInfinite: tagged(Infinity), tagString: tagged("1") }
+                     tagNaN: tagged(NaN), tagNegative: tagged(-1), tagFraction: tagged(0.5), tagInfinite: tagged(Infinity), tagString: tagged("1"),
+                     tagObject: tagged({ valueOf() { coerced++; return 1 } }) }
     const out = {}
     for (const k in shapes) { const bar = { layout: { right: shapes[k] } }; out[k] = [M.findBarEntry(bar, PID, installed).id === undefined, M.barEntryWritable(bar, PID, installed)] }
+    out.coerced = coerced
     return out
   }, { lengthy: [true, false], otherWrapper: [true, false], args: [true, false], typed: [true, false], text: [true, false], number: [true, false],
-       tagNaN: [true, false], tagNegative: [true, false], tagFraction: [true, false], tagInfinite: [true, false], tagString: [true, false] })
+       tagNaN: [true, false], tagNegative: [true, false], tagFraction: [true, false], tagInfinite: [true, false], tagString: [true, false],
+       tagObject: [true, false], coerced: 0 })
   // The host's own list of sections (barSectionList), in either form: a
   // sequence of names is walked as the Array is, its non-names skipped;
   // anything else is the 4.0.x fallback, as before -- so an entry in
   // centerEnd is found through a sequence of the host's names and is absent
-  // through an object with a length, where one in center is found.
+  // through an object with a length, where one in center is found; and a
+  // sequence-tagged list of names whose length is negative falls back to the
+  // three too, rather than to no section at all.
   checkCall("D-HOST-15: the host's list of sections is read in the sequence form as the Array is, and anything else falls back to 4.0.x's three", () => {
     const at = (section, list) => read(M, layoutWith(section, Object.assign({ id: PID }, ENTRY)), list)
     const lengthy = {}
     sections.forEach((s, i) => { lengthy[i] = s })
     lengthy.length = sections.length
+    const negative = Object.assign({}, lengthy, { length: -1 })
+    Object.defineProperty(negative, Symbol.toStringTag, { value: "V4Sequence" })
     return [at("centerEnd", sequence(sections)).settings[1], at("tray", sequence(["dock", 7, "tray"])).settings[1], at("centerEnd", lengthy).id, at("center", lengthy).settings[1],
-            read(M, fresh(layoutWith("centerEnd", Object.assign({ id: PID }, ENTRY))), sequence(sections)).settings[1]]
-  }, [25, 25, "<none>", 25, 25])
-  // The copy is the entry's fields and nothing it could carry in: a key
-  // named __proto__ does not set the copy's prototype, and a key a polluted
-  // Object.prototype would lend every object (D-SG-3) is not copied as a
-  // setting. Read with Object.prototype polluted for the length of the call.
-  checkCall("D-HOST-15: the copy of a wrapped entry never takes a prototype from it and never copies a key Object.prototype holds", () => {
-    const fields = { id: PID, maxRecents: 25 }
-    Object.defineProperty(fields, "__proto__", { value: { polluted: true }, enumerable: true, configurable: true, writable: true })
+            read(M, fresh(layoutWith("centerEnd", Object.assign({ id: PID }, ENTRY))), sequence(sections)).settings[1],
+            at("center", negative).settings[1], at("centerEnd", negative).id]
+  }, [25, 25, "<none>", 25, 25, 25, "<none>"])
+  // The copy is the entry's own fields and nothing it could carry in. An
+  // entry holding `__proto__`, in the form V4 makes of it (protoForm: no own
+  // field, its fields and the nested object's on its prototype), is no entry
+  // in the window -- the nested object's fields are not read as settings,
+  // nothing is writable -- and an id that only its prototype holds is not
+  // the plugin's, so a real entry after such a decoy is the one found; and a
+  // key a polluted Object.prototype lends every object (D-SG-3) is not
+  // copied. The first reading's for...in copy took the nested fields and
+  // matched the nested id (the code recheck of 616061f).
+  checkCall("D-HOST-15: an entry holding __proto__, as V4 wraps it, reads as absent in the window -- no nested field read as a setting, not writable -- an id only its prototype holds is not the plugin's, and a key a polluted Object.prototype lends is not copied", () => {
+    const one = (e) => ({ layout: refObject({ right: sequence([e]) }, true) })
     Object.defineProperty(Object.prototype, "count", { value: 1, enumerable: true, configurable: true, writable: true })
+    let polluted
     try {
-      const found = M.findBarEntry({ layout: refObject({ right: sequence([refObject(fields)]) }, true) }, PID, ["right"])
-      return [Object.getPrototypeOf(found) === Object.prototype, found.polluted, Object.prototype.hasOwnProperty.call(found, "count"), Object.prototype.hasOwnProperty.call(found, "__proto__"), found.maxRecents]
+      const found = M.findBarEntry(one(refObject({ id: PID, maxRecents: 25 })), PID, ["right"])
+      polluted = [Object.getPrototypeOf(found) === Object.prototype, Object.prototype.hasOwnProperty.call(found, "count"), found.maxRecents]
     } finally { delete Object.prototype.count }
-  }, [true, undefined, false, false, 25])
+    // A wrapper the copy cannot read (JSON.stringify throws: a BigInt in a
+    // double; V4 makes none) is no entry, and the walk goes on past it.
+    const after = (e) => ({ layout: refObject({ right: sequence([e, refObject(Object.assign({ id: PID }, ENTRY))]) }, true) })
+    return { odd: read(M, one(protoForm({ id: PID, polluted: true, maxRecents: 25 })), ["right"]),
+             idOnly: read(M, one(protoForm({ id: PID, maxRecents: 5 })), ["right"]),
+             decoyFirst: read(M, after(protoForm({ id: PID, maxRecents: 5 })), ["right"]),
+             unreadableFirst: read(M, after(refObject({ id: PID, maxRecents: 5, big: 1n })), ["right"]),
+             polluted }
+  }, { odd: NONE, idOnly: NONE, decoyFirst: FOUND, unreadableFirst: FOUND, polluted: [true, false, 25] })
+  // The copy reads an entry as the Array after the window holds it -- the
+  // host's JSON.parse of its own JSON text -- keys named as Object.prototype's
+  // members included (a hand-edited `constructor`, a `toJSON` that is text):
+  // the first reading's for...in copy skipped every key Object.prototype
+  // holds, so `constructor` read as Object's own function in the window and
+  // as the entry's text after it.
+  checkCall("D-HOST-15: an entry in the sequence form reads as its Array form does, keys named as Object.prototype's members included", () => {
+    const entry = Object.assign({ id: PID, constructor: "c", toJSON: "t" }, ENTRY)
+    const plain = JSON.parse(JSON.stringify({ layout: { right: [entry] } }))
+    const a = M.findBarEntry(plain, PID, ["right"])
+    const w = M.findBarEntry({ layout: refObject({ right: sequence([refObject(Object.assign({}, entry))]) }, true) }, PID, ["right"])
+    const canon = (o) => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]))
+    return [canon(w) === canon(a), w.constructor, w.toJSON, Object.getPrototypeOf(w) === Object.prototype, M.barEntryWritable(plain, PID, ["right"])]
+  }, [true, "c", "t", true, true])
 
   // The service, through Service.qml's own functions (tests/service-harness.js):
   // the bar config in the fresh API's form until the service's own write

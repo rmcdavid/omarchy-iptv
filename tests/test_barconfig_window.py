@@ -195,6 +195,44 @@ class BarconfigWindowReadout(unittest.TestCase):
         self.assertIn("state.json at the end: recents 0, marker True, sources 1 (the playlist), activeKey set",
                       out.getvalue())
 
+    def test_a_load_that_read_no_array_is_never_after(self):
+        # A load whose readout names no section, or reads them undefined (no
+        # shell yet: the defaults too), is not counted as after the window
+        # (the recheck of 616061f: such a load read as "after").
+        for readout, kind in (("threw=TypeError", "unknown-none"),
+                              ("left=undef(-) centerBegin=undef(-) center=undef(-) centerEnd=undef(-) right=undef(-) "
+                               "tray=undef(-)", "unknown-mixed")):
+            lines = ([created(100), before(140, "fresh")] + api(141) + [shell_changed(141, SEQ, "[]"), published(143)]
+                     + assigned(148) + [state_load(151, readout, 10, 10, "[]")])
+            (v,), _ = verdicts(self.mod, lines)
+            self.assertEqual(v["load"], kind)
+
+    def test_the_first_load_is_judged(self):
+        # A service's FIRST state load is the one the window is judged by,
+        # whatever a later one reads (the code recheck's surviving mutant
+        # read the last).
+        lines = ([created(100), before(140, "fresh")] + api(141) + [shell_changed(141, SEQ, "[]"), published(143),
+                 state_load(151, SEQ, 10, 10, "[]")] + assigned(300)
+                 + [state_load(900, ARR, 15, 25, "[id,maxRecents,playlistUrl,refreshMinutes]")])
+        (v,), (rec,) = verdicts(self.mod, lines)
+        self.assertEqual(len(rec["loads"]), 2)
+        self.assertEqual(v["load"], "inside")
+        self.assertEqual(v["trim"], "15->10")
+        self.assertEqual(v["trimMax"], "10")
+
+    def test_another_objects_assignment_does_not_close_it(self):
+        # Only an assignment to the API object the service was handed closes
+        # its window (the code recheck's other surviving mutant closed it at
+        # any object's).
+        other = [P + "RIG-W 148 10 widgetRegistryChanged revision=1 ours=no",
+                 P + "RIG-W 148 11 apiBarConfig PluginShellApi_QMLTYPE_30(0x7fffce6db7e0) shape=%s service=yes" % ARRC]
+        lines = ([created(100), before(140, "fresh")] + api(141) + [shell_changed(141, SEQ, "[]"), published(143)]
+                 + other + [state_load(151, SEQ, 10, 10, "[]")] + assigned(300))
+        (v,), (rec,) = verdicts(self.mod, lines)
+        self.assertEqual(rec["closed"], 300)
+        self.assertEqual(v["openMs"], 159)
+        self.assertEqual(v["load"], "inside")
+
     def test_sections(self):
         self.assertEqual(self.mod.sections(SEQ), "seq")
         self.assertEqual(self.mod.sections(ARR), "array")

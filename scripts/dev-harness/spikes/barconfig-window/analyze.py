@@ -23,7 +23,12 @@ settings from (Model.findBarEntry answers `{}`, `entry=[]`); CLOSED at the
 first assignment of that object's barConfig from script (syncPluginApis,
 shell.qml 904: `apiBarConfig` with every section an `array`), or at once
 when the object was already so (`cached`, or a fresh one whose sections
-read `array`). A state load whose readout still reads `seq` fell INSIDE it.
+read `array`). A state load whose readout still reads `seq` fell INSIDE it;
+one that reads every section an `array` fell AFTER it; one whose readout
+names no section (`none`) or another mix (`mixed`, a section undefined: no
+shell) is reported as `unknown-<kind>`, never as after, because the
+service read no Array there (lane-dh15fix2: no kept start has one). The
+service's FIRST state load is the one judged.
 Python 3 standard library only.
 """
 import json
@@ -186,8 +191,8 @@ def verdict(rec):
     if load is None:
         v["load"] = "none"
     else:
-        inside = load["sections"] == "seq"
-        v["load"] = "inside" if inside else "after"
+        kind = load["sections"]
+        v["load"] = "inside" if kind == "seq" else "after" if kind == "array" else "unknown-" + kind
         v["trim"] = "%s->%s" % (load["onDisk"], load["kept"])
         v["trimMax"] = load["trimMax"]
     plan = rec["plans"][0] if rec["plans"] else None
