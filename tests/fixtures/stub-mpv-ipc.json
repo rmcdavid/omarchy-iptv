@@ -1,5 +1,5 @@
 {
- "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again. The two transcripts pinned-p1c and prepin-p1c (lane-p1c, 2026-10-29: the tree's launch argv after the format list, prefetch and console pins, and sec-int 124589e's before them) were taken the same way except that prlimit execs mpv directly, with no timeout wrapper, and the player is stopped by the pid held. The two transcripts relay-pin and relay-none (D-SINK-102, 2026-11-14) were taken the same way, prlimit execing mpv directly, the player started idle with the tree's launch argv (relay pin at port 48510, build 0.19.1+0a1b2c3d, the user's --vo=null --ao=null where the tokens stand, no --force-window) and the same argv without the pin, each quit over IPC; the crash journal unchanged.",
+ "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again. The two transcripts pinned-p1c and prepin-p1c (lane-p1c, 2026-10-29: the tree's launch argv after the format list, prefetch and console pins, and sec-int 124589e's before them) were taken the same way except that prlimit execs mpv directly, with no timeout wrapper, and the player is stopped by the pid held. The two transcripts relay-pin and relay-none (D-SINK-102, 2026-11-14) were taken the same way, prlimit execing mpv directly, the player started idle with the tree's launch argv (relay pin at port 48510, build 0.19.1+0a1b2c3d, the user's --vo=null --ao=null where the tokens stand, no --force-window) and the same argv without the pin, each quit over IPC; the crash journal unchanged. The four transcripts argv-profile-a to -d (F-HARNESS-76, 2026-11-28, the daily run) were taken the same way, prlimit execing mpv directly, each player idle with --idle=yes --force-window=no --vo=null --ao=null --msg-level=all=error and the profile tokens after them, quit over IPC, the pid held; the crash journal unchanged. Four more argvs measured the same day did not start (exit 1, no socket, 'Error parsing option profile' on stdout) and so have no transcript: --profile=nosuch between two valid tokens, --profile= (empty), --profile=low-latency,nosuch,osd-box, and a bare --profile.",
  "mpv": "mpv v0.41.0",
  "measured": "2026-10-29",
  "transcripts": [
@@ -6974,6 +6974,463 @@
      "command": [
       "get_property",
       "option-info/http-proxy/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-profile-a",
+   "what": "a bare idle player with one built-in profile named on the command line (F-HARNESS-76): the option the profile sets reads as set and as set from the command line, and no other option does",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--force-window=no",
+    "--vo=null",
+    "--ao=null",
+    "--msg-level=all=error",
+    "--profile=low-latency"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "fflags": "+nobuffer"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-profile-b",
+   "what": "a list of two profiles between a plain set and an -add of the same key-value list: each applies at its place, and a profile that names a profile (box) sets what that one sets",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--force-window=no",
+    "--vo=null",
+    "--ao=null",
+    "--msg-level=all=error",
+    "--demuxer-lavf-o=a=1",
+    "--profile=box,low-latency",
+    "--demuxer-lavf-o-add=z=9"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "fflags": "+nobuffer",
+       "z": "9"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "console-border_size": "0",
+       "console-corner_radius": "0",
+       "context_menu-padding_y": "0",
+       "context_menu-corner_radius": "0",
+       "stats-border_size": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-profile-c",
+   "what": "a profile, then a plain set of the list it added to, then another profile: the later token wins",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--force-window=no",
+    "--vo=null",
+    "--ao=null",
+    "--msg-level=all=error",
+    "--profile=low-latency",
+    "--demuxer-lavf-o=a=1",
+    "--profile=osd-box"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "console-border_size": "0",
+       "console-corner_radius": "0",
+       "context_menu-padding_y": "0",
+       "context_menu-corner_radius": "0",
+       "stats-border_size": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-profile-d",
+   "what": "the -add and -append spellings of the token: each applies as the plain one does",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--force-window=no",
+    "--vo=null",
+    "--ao=null",
+    "--msg-level=all=error",
+    "--profile-add=low-latency",
+    "--profile-append=osd-box"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "fflags": "+nobuffer"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "console-border_size": "0",
+       "console-corner_radius": "0",
+       "context_menu-padding_y": "0",
+       "context_menu-corner_radius": "0",
+       "stats-border_size": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
      ],
      "reply": {
       "error": "success",

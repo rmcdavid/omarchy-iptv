@@ -95,6 +95,10 @@ def launch_argv(pins=True, relay_port=RELAY_PORT):
 
 
 HTTPS_PROFILE = [{"name": "protocol.https", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
+# F-HARNESS-76: a profile of the user's own, as their mpv.conf would hold it,
+# for a `--profile=loose` token on a launch argv.
+LOOSE_PROFILE = [{"name": "loose", "options": [{"key": "tls-verify", "value": "no"},
+                                               {"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
 
 
 def record_requests(client):
@@ -148,6 +152,27 @@ class StubAgainstTheShippingReadBack(unittest.TestCase):
 
     def test_the_same_profile_is_harmless_to_a_pinned_player(self):
         stub = self.player(argv=launch_argv(), profiles=HTTPS_PROFILE)
+        self.assertEqual(helper.read_tls_state(stub.client, RELAY_PORT), (True, 0, 0))
+
+    def test_a_profile_named_on_a_loose_player_s_argv_is_read_and_migrated(self):
+        """F-HARNESS-76: the stub applied no `--profile=<name>` token, so a
+        player from before the pins that was launched with one read as a
+        player launched without it. With the token applied (as mpv 0.41.0
+        was measured to apply it), the shipping read-back sees what such a
+        player holds -- verification off and a stream option -- and the
+        migration makes it safe, as it does any loose player."""
+        stub = self.player(argv=launch_argv(pins=False) + ["--profile=loose"], profiles=LOOSE_PROFILE)
+        self.assertEqual(helper.read_tls_state(stub.client), (False, 1, 4))
+        result = helper.migrate_tls(stub.client)
+        self.assertEqual((result["migrated"], result["verify"], result["optionCount"], result["unpinned"]),
+                         (True, True, 0, 1))
+
+    def test_the_same_token_is_harmless_before_the_pin_block(self):
+        dirs = {"cwd": "/nonexistent", "screenshots": "/nonexistent/shots",
+                "watchLater": "/nonexistent/wl", "shaderCache": "/nonexistent/sc"}
+        cut = len(helper.mpv_pin_block(dirs))
+        argv = launch_argv()
+        stub = self.player(argv=argv[:len(argv) - cut] + ["--profile=loose"] + argv[len(argv) - cut:], profiles=LOOSE_PROFILE)
         self.assertEqual(helper.read_tls_state(stub.client, RELAY_PORT), (True, 0, 0))
 
 

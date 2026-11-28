@@ -1563,7 +1563,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4192}
 # widget offscreen with a host that has no service yet -- starting until the
 # first miss, and never "service not loaded" on the way to a service found
 # at the first ask. Red on 4159ab8's widget and on four mutants of the wiring.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3153}
+# 3153 -> 3155 on 2026-11-28 (F-HARNESS-76, the daily run): the stub's
+# profile token against the shipping read-back, on a loose player (red on
+# the old stub) and before the pin block.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3155}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1634,7 +1637,10 @@ HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # relay pin, from the argv and per file -- two transcripts measured on mpv
 # 0.41.0 (relay-pin, relay-none; re-measured on 2026-11-15, 12 steps, 0
 # differ) and the per-file read-back case.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-47}
+# 47 -> 48 on 2026-11-28 (F-HARNESS-76, the daily run): the stub applies a
+# --profile token at its place on the argv -- four transcripts measured on
+# mpv 0.41.0 (argv-profile-a to -d) and the rules one at a time.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-48}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
 # check-tree): 32 checks over the shipping helper as a subprocess and the
 # shell's Image as a probe under an address-space rlimit, plus its own "ran

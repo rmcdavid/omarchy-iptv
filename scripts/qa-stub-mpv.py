@@ -148,6 +148,13 @@ with the reason. What was measured, in short:
     later token for the same option wins, each answers set-from-commandline,
     and a missing file applies nothing. The two line forms the helper writes
     are modelled (expand_includes).
+  * (F-HARNESS-76, measured 2026-11-28) a `--profile=<name>[,<name>]` token
+    is applied at its place on the argv: the options of each profile it
+    names apply there, a profile's own `profile` key included, a later
+    token for the same option wins, and each option set answers
+    set-from-commandline. An unknown name, an empty value and a bare
+    `--profile` stop mpv from starting and are skipped here
+    (expand_profiles).
   * a flag takes true/false and the strings "yes"/"no", and the EMPTY string
     as "yes"; any other string is `unsupported format for accessing
     property`, a number or null `error accessing property`.
@@ -401,6 +408,76 @@ def string_form(name, value):
     return value
 
 
+# F-HARNESS-76. The three spellings of a profile token measured applying
+# (`--profile=`, `--profile-add=`, `--profile-append=`), the one profile key
+# measured through a profile that is not an option name of its own in this
+# stub (osd-box's `script-opt`, which appended to script-opts), and a bound
+# on nesting: mpv's own bound was not measured, and a profile that names
+# itself must end somewhere.
+PROFILE_TOKENS = ("profile", "profile-add", "profile-append")
+PROFILE_KEYS = {"script-opt": "script-opts-append"}
+PROFILE_DEPTH = 20
+
+
+def profile_tokens(value, profiles, depth=0):
+    """The tokens a `--profile=<value>` stands for, or None when mpv would
+    refuse it. `value` is one name or several joined by commas; a name is
+    looked up among `profiles` (the built-in ones, then STUB_PROFILES'), and
+    every entry of that name applies, in order. Each option of a profile is
+    the token `--key=value`; a `profile` key is another profile, applied in
+    its place. An empty value, a name no profile has, and a nesting deeper
+    than PROFILE_DEPTH are None: the first two were measured to stop mpv
+    from starting. An `include` key inside a profile is not modelled and is
+    left out."""
+    if not value or depth > PROFILE_DEPTH:
+        return None
+    out = []
+    for name in value.split(","):
+        found = [p for p in profiles if isinstance(p, dict) and p.get("name") == name]
+        if not found:
+            return None
+        for profile in found:
+            for option in profile.get("options") or []:
+                key, held = option.get("key"), option.get("value")
+                if key == "profile":
+                    nested = profile_tokens(held, profiles, depth + 1)
+                    if nested is None:
+                        return None
+                    out.extend(nested)
+                elif key != "include":
+                    out.append("--%s=%s" % (PROFILE_KEYS.get(key, key), held))
+    return out
+
+
+def expand_profiles(argv, profiles):
+    """`argv` with every profile token replaced, where it stands, by the
+    tokens of the profiles it names (F-HARNESS-76). This stub ignored the
+    token, so a player launched with `--profile=<name>` read as one launched
+    without it. Measured on mpv 0.41.0, headless and idle, 2026-11-28 (the
+    transcripts argv-profile-a to -d): the profile's options apply at the
+    token's place, so a later token for the same option wins and an earlier
+    one loses; every option it sets answers set-from-commandline true and no
+    other option does; a list of names applies each in order; a profile a
+    profile names is applied in its place (`box` set what `osd-box` sets);
+    `-add` and `-append` apply as the plain form does. A token mpv refuses
+    is skipped here, as every refused token is: `--profile=` with an unknown
+    name, alone or in a list, or with no value, and a bare `--profile`, each
+    stopped mpv from starting (exit 1, no socket; measured the same day).
+    The other list suffixes (`-set`, `-remove`, `-clr`) were not measured
+    and are skipped. A `profile=` line inside an --include file is not
+    modelled: the tokens are expanded before the files are read."""
+    out = []
+    for arg in argv:
+        name, sep, value = arg[2:].partition("=") if arg.startswith("--") else ("", "", "")
+        if name in PROFILE_TOKENS:
+            out.extend((profile_tokens(value, profiles) if sep else None) or [])
+        elif name == "profile" or (name.startswith("profile-") and name[len("profile"):] in OPTION_SUFFIXES):
+            continue                                # an unmeasured suffix, or the bare token
+        else:
+            out.append(arg)
+    return out
+
+
 def expand_includes(argv):
     """`argv` with every `--include=<file>` token replaced, where it stands,
     by the tokens the file holds (F-HARNESS-81). The helper hands a user's
@@ -455,7 +532,7 @@ def read_argv(argv):
     value mpv would refuse is skipped here; mpv itself would refuse to start."""
     values = dict((name, copy_value(default)) for name, (_, default) in OPTIONS.items())
     named = set()
-    for arg in expand_includes(argv):
+    for arg in expand_includes(expand_profiles(argv, stub_profiles())):
         if not arg.startswith("--"):
             continue
         name, sep, value = arg[2:].partition("=")
@@ -1537,7 +1614,8 @@ def self_test():
 
         def test_the_measured_transcripts_replay_identically(self):
             self.assertEqual(sorted(t["name"] for t in self.transcripts),
-                             ["argv-a", "argv-b", "argv-c", "argv-d", "pinned", "pinned-p1c", "prepin", "prepin-p1c",
+                             ["argv-a", "argv-b", "argv-c", "argv-d", "argv-profile-a", "argv-profile-b", "argv-profile-c",
+                              "argv-profile-d", "pinned", "pinned-p1c", "prepin", "prepin-p1c",
                               "relay-none", "relay-pin", "runtime-b"])
             compared, wrong = 0, []
             for t in self.transcripts:
@@ -1551,10 +1629,11 @@ def self_test():
                     if got != step["reply"]:
                         wrong.append("%s step %d %r: mpv %r, stub %r" % (t["name"], number, command, step["reply"], got))
             self.assertEqual(wrong, [])
-            # A replay that skipped its way to green proves nothing: 560 steps
+            # A replay that skipped its way to green proves nothing: 596 steps
             # were measured (374 until lane-p1c's two transcripts, 548 until
-            # D-SINK-102's two) and all but the named ones are compared.
-            self.assertGreaterEqual(compared, 539)
+            # D-SINK-102's two, 560 until F-HARNESS-76's four) and all but
+            # the named ones are compared.
+            self.assertGreaterEqual(compared, 571)
 
         def test_a_loadfile_s_per_file_http_proxy_reads_back_while_its_file_is_current(self):
             """D-SINK-102 (measured on mpv 0.41.0): the per-file value reads
@@ -1664,6 +1743,54 @@ def self_test():
             for option in ("prefetch-playlist", "load-console", "load-osd-console"):
                 self.assertEqual(older.get("option-info/%s/set-from-commandline" % option), (False, None), option)
             self.assertEqual(older.get("load-console"), (True, None))
+
+        def test_a_profile_token_is_applied_at_its_place_on_the_argv(self):
+            # F-HARNESS-76. This stub ignored `--profile=<name>`, so a player
+            # launched with one read as a player launched without it. The
+            # four transcripts argv-profile-a to -d are mpv 0.41.0's answers
+            # (2026-11-28) and replay above; these name the rules one at a
+            # time, and the ones the transcripts cannot hold: the tokens mpv
+            # refused to start with, and a profile of the user's own.
+            def reads(*tokens):
+                stub = Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=["--no-config"] + list(tokens))
+                return [stub.get(name)[0] for name in ("demuxer-lavf-o", "option-info/demuxer-lavf-o/set-from-commandline",
+                                                       "tls-verify", "option-info/tls-verify/set-from-commandline")]
+            self.assertEqual(reads("--profile=low-latency"), [{"fflags": "+nobuffer"}, True, False, False])
+            self.assertEqual(reads("--profile=low-latency", "--demuxer-lavf-o=a=1"), [{"a": "1"}, True, False, False])
+            self.assertEqual(reads("--demuxer-lavf-o=a=1", "--profile=low-latency"),
+                             [{"a": "1", "fflags": "+nobuffer"}, True, False, False])
+            # A profile a profile names: box names osd-box, which sets script-opts.
+            nested = Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=["--no-config", "--profile=box"])
+            self.assertEqual(nested.get("script-opts")[0]["console-border_size"], "0")
+            self.assertEqual(nested.get("option-info/script-opts/set-from-commandline"), (True, None))
+            # What mpv refused to start with applies nothing, the valid names
+            # of a refused list included; neither does an unmeasured suffix.
+            for refused in ("--profile=nosuch", "--profile=", "--profile", "--profile=low-latency,nosuch",
+                            "--profile-set=low-latency", "--profile-remove=low-latency", "--profile-clr"):
+                self.assertEqual(reads("--tls-verify=yes", refused), [{}, False, True, True], refused)
+            # The user's own profile (their mpv.conf, STUB_PROFILES), named on
+            # the argv of a player from before the pins: it undoes the token
+            # before it and loses to the token after it.
+            import shutil
+            import tempfile
+            work = tempfile.mkdtemp(prefix="stub-profile-")
+            self.addCleanup(shutil.rmtree, work, True)
+            opts = os.path.join(work, "x.conf")
+            with open(opts, "w", encoding="utf-8") as handle:
+                handle.write("demuxer-lavf-o=%3%a=1\n")
+            self.assertEqual(reads("--include=" + opts), [{"a": "1"}, True, False, False])
+            os.environ["STUB_PROFILES"] = json.dumps([
+                {"name": "loose", "options": [{"key": "tls-verify", "value": "no"}, {"key": "profile", "value": "low-latency"}]},
+                {"name": "knot", "options": [{"key": "tls-verify", "value": "no"}, {"key": "profile", "value": "knot"}]},
+                {"name": "reader", "options": [{"key": "include", "value": opts}, {"key": "tls-verify", "value": "no"}]}])
+            self.assertEqual(reads("--tls-verify=yes", "--profile=loose"), [{"fflags": "+nobuffer"}, True, False, True])
+            self.assertEqual(reads("--profile=loose", "--tls-verify=yes"), [{"fflags": "+nobuffer"}, True, True, True])
+            self.assertEqual(reads("--tls-verify=yes", "--profile-add=loose"), [{"fflags": "+nobuffer"}, True, False, True])
+            # A profile that names itself ends, and applies nothing.
+            self.assertEqual(reads("--tls-verify=yes", "--profile=knot"), [{}, False, True, True])
+            # An include inside a profile is left out (the same file as a
+            # token of its own, above, is read); the rest of it applies.
+            self.assertEqual(reads("--tls-verify=yes", "--profile=reader"), [{}, False, False, True])
 
         def test_an_include_file_is_applied_at_its_place_on_the_argv(self):
             # F-HARNESS-81. The helper hands the user's mpvArgs to mpv in an
