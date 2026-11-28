@@ -181,6 +181,30 @@ class HarnessDisplay(unittest.TestCase):
         r, out = self.drive(target=DESK, HYPRLAND_INSTANCE_SIGNATURE="nosuchinstance")
         self.assertEqual((out["DISPLAY"], out["SIG"]), ("<unset>", "<unset>"))
 
+    # -- the stand-in signature (D-PIP-8, 2026-11-27)
+
+    def test_a_stand_in_signature_reaches_a_nested_target(self):
+        r, out = self.drive(target=CAGE, OMARCHY_IPTV_HARNESS_SIGNATURE="harness")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((out["DISPLAY"], out["SIG"]), ("<unset>", "harness"))
+
+    def test_the_desk_ignores_a_stand_in(self):
+        r, out = self.drive(target=DESK, OMARCHY_IPTV_HARNESS_SIGNATURE="harness")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual((out["DISPLAY"], out["SIG"]), ("<unset>", SIG))
+
+    def test_a_stand_in_naming_a_real_instance_is_refused(self):
+        r, out = self.drive(target=CAGE, OMARCHY_IPTV_HARNESS_SIGNATURE=SIG)
+        self.assertEqual(r.returncode, 97, "harness_env took a stand-in that names an instance: %r" % (out,))
+        self.assertIn("D-PIP-8", r.stderr)
+        self.assertNotIn("SIG", out)
+
+    def test_a_stand_in_that_is_not_one_word_is_refused(self):
+        for bad in ("../" + SIG, "a b", "x/y"):
+            r, out = self.drive(target=CAGE, OMARCHY_IPTV_HARNESS_SIGNATURE=bad)
+            self.assertEqual(r.returncode, 97, "harness_env took %r: %r" % (bad, out))
+            self.assertIn("D-PIP-8", r.stderr)
+
     # -- the runtime directory (F-HARNESS-48)
 
     def listening(self):

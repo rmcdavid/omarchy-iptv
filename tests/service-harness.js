@@ -304,7 +304,11 @@ function makeIds(h) {
     // h.detached keeps the command -- what /proc shows -- and h.detachedRuns
     // each run's command and what the helper parses (helperView, which throws
     // on a flag with no list, as the helper refuses one).
-    Quickshell: { env(name) { return h.env && typeof h.env[name] === "string" ? h.env[name] : "" }, execDetached(context) {
+    // env: a name the test sets answers its string; any other name answers
+    // null, as Quickshell 0.3.2 answers an unset variable (measured
+    // offscreen, 2026-11-27; F-HARNESS-133). It answered "" until then,
+    // which let D-PIP-8's `=== ""` guard pass here and fail on the host.
+    Quickshell: { env(name) { return h.env && Object.prototype.hasOwnProperty.call(h.env, name) && typeof h.env[name] === "string" ? h.env[name] : null }, execDetached(context) {
       if (!Array.isArray(context) || context.length === 0) throw new TypeError("Passing incompatible arguments to C++ functions from JavaScript is not allowed (execDetached takes a command list; a { command, environment } object is refused, measured on Quickshell 0.3.2)")
       const ctx = { command: context, environment: {} }
       const argv = ctx.command.map(String)
@@ -510,6 +514,19 @@ function defaultOf(type) {
   if (type === "int" || type === "real" || type === "double") return 0
   if (type === "string") return ""
   return null
+}
+
+// What a binding's value becomes in a property of `type`, where the double
+// knows: a `string` property bound to null reads "" (measured on Quickshell
+// 0.3.2 offscreen, 2026-11-27: a `readonly property string` bound to
+// Quickshell.env(<unset>) read "", typeof string, with no warning). Since
+// F-HARNESS-133 the double's Quickshell.env answers null for an unset name,
+// as the host does, so Service.qml's `home` needs this to read as it does
+// there. A plain property's initial binding goes through it too, read as
+// the same assignment and not measured. Nothing else is converted,
+// undefined included: no other case was measured.
+function bindingValue(type, v) {
+  return type === "string" && v === null ? "" : v
 }
 
 const PID = "io.github.rmcdavid.iptv"
@@ -976,8 +993,8 @@ function bootService(svc, Model, o) {
   // D-HOST-16: manifest.json beside the tree as the view finds it --
   // `manifestText` (null for no file), or the running model's own version,
   // which is what a whole install holds (the gate proves the two agree).
-  // D-REL-16: what Quickshell.env answers, by name (`env`); "" for anything
-  // else, as before.
+  // D-REL-16: what Quickshell.env answers, by name (`env`); null for
+  // anything else, as the host answers an unset name (F-HARNESS-133).
   h.env = opts.env && typeof opts.env === "object" ? opts.env : {}
   h.manifestFile = new ManifestFile(opts.manifestText !== undefined ? opts.manifestText : JSON.stringify({ id: PID, version: Model.PLUGIN_VERSION }) + "\n")
   h.stateInitStdout = { text: "" }
@@ -1054,7 +1071,7 @@ function bootService(svc, Model, o) {
   for (const p of props) {
     if (p.readonly && p.expr !== null) {
       const get = p.block ? compile("", p.expr, "binding_" + p.name) : compile("", "return (" + p.expr + ")", "binding_" + p.name)
-      Object.defineProperty(root, p.name, { get() { try { return get() } catch (e) { return defaultOf(p.type) } }, enumerable: true, configurable: true })
+      Object.defineProperty(root, p.name, { get() { try { return bindingValue(p.type, get()) } catch (e) { return defaultOf(p.type) } }, enumerable: true, configurable: true })
       continue
     }
     values[p.name] = defaultOf(p.type)
@@ -1085,7 +1102,7 @@ function bootService(svc, Model, o) {
   }
   for (const p of props) {
     if (p.readonly || p.expr === null || p.block) continue
-    try { values[p.name] = compile("", "return (" + p.expr + ")", "init_" + p.name)() } catch (e) { values[p.name] = defaultOf(p.type) }
+    try { values[p.name] = bindingValue(p.type, compile("", "return (" + p.expr + ")", "init_" + p.name)()) } catch (e) { values[p.name] = defaultOf(p.type) }
   }
   // Signals are recorded.
   for (const m of serviceText.matchAll(/^  signal ([A-Za-z_][A-Za-z0-9_]*)\(/gm)) root[m[1]] = (...a) => h.signals.push([m[1]].concat(a))

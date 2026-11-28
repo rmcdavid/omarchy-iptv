@@ -471,7 +471,13 @@ live() {
   # speak, and takes PiP off the offer. P1 below asserts the lua case, so an
   # override makes P1 fail on purpose; run it only to watch the refusal.
   export STUB_HYPRCTL_PROVIDER=${OMARCHY_IPTV_PIP_PROVIDER:-lua}
-  export HYPRLAND_INSTANCE_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-harness}
+  # D-PIP-8: the service reads an unset signature as no Hyprland session and
+  # hides PiP, and run.sh drops the signature toward a nested target, so a
+  # caged run hands run.sh a stand-in, which harness_env checks names no
+  # compositor and ignores on the desk. (This line used to export the
+  # signature itself, `:-harness`, which run.sh then dropped: the cage was
+  # green only because the service read an unset signature as a session.)
+  export OMARCHY_IPTV_HARNESS_SIGNATURE=harness
 
   echo "== start harness (detached, serving a real stream, player kept across restarts)"
   # Detached, like player-scenario.sh: `restart-shell` needs a shell that

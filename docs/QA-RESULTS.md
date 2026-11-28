@@ -31618,3 +31618,145 @@ first scanFinished, `beforeApi ensureService fresh` only after the second,
    cache does not hold across warm starts, and why the host's bar asks 5-6
    ms after the service on the toggle's enable when the plugin's widget
    registered 2-8 ms before it.
+
+## D-PIP-8 and F-HARNESS-133: an unset Hyprland signature is no session (the lead, 2026-11-27)
+
+dev at f5fb966; quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3. Each
+call below is the lead's call under the owner's standing authority of
+2026-11-09.
+
+**What Quickshell.env answers (F-HARNESS-133's measurement).** A probe
+shell.qml under `/usr/bin/quickshell -p`, offscreen, as gdb's child (`handle
+all nostop noprint pass`, `run`, `kill`), on a private D-Bus
+(scripts/dev-harness/private-bus.sh), with DISPLAY, WAYLAND_DISPLAY,
+HYPRLAND_INSTANCE_SIGNATURE and QT_QPA_PLATFORMTHEME unset and a scratch
+runtime folder and QML cache. For an unset name, `typeof` object and `===
+null` (JSON `null`); for a name set empty, the string `""`; for a set name,
+its string. In a second probe a `readonly property string` bound to an
+unset name read `""` (typeof string, no warning), `(env || (home +
+"/.cache")) + "/x"` read `/.cache/x`, and a `property var` bound to it read
+null. The crash journal read 89 before and after both.
+
+**The fix.** handlePipWhichExit (Service-pip.js) reads anything but a
+non-empty string as no session (`typeof signature !== "string" || signature
+=== ""`), so an unset signature hides PiP at `which`, as one set empty
+always did. What the old guard cost on a real host: the installed hyprctl
+(Hyprland 0.56.2) refuses to run without a signature (its strings hold
+"HYPRLAND_INSTANCE_SIGNATURE was not set! (Is Hyprland running?)", and
+lane-fm324 measured the real binary answering `not set!`, exit 1, on
+2026-10-26; scripts/dev-harness/README.md), so `systeminfo` failed and PiP
+was hidden there too: one process more, the same outcome. Only a hyprctl
+that answers without a session, such as the harness's stub, kept PiP on
+offer. This is recheck-pip8's finding 2 (a read-only recheck of the diff,
+below). The service harness's Quickshell.env double (tests/
+service-harness.js) answers null for a name the test does not set, where it
+answered `""`, and a `string`-typed root binding the harness evaluates reads
+`""` for null (`bindingValue`), as measured; nothing else is converted,
+undefined included, because nothing else was measured. The guide-binding double in
+tests/Model.test.js (F-GATE-34's) answers null too; its checks read the same
+either way, because qmlCacheFolder reads each value through envText
+(model/view.mjs), which takes any non-string as `""`.
+
+**Red first (rules 10 and 11).**
+- The new node check, "D-PIP-8: an unset Hyprland signature hides PiP at
+  `which` as one set empty does, and only a non-empty one goes on to
+  systeminfo", on the old guard with the new double: 4190 checks, 1 failure,
+  that check, reading `["null", true, true, []]` for the unset signature (PiP
+  kept, systeminfo started) where it wants `["null", false, false, []]`, and
+  the same for the fourth case's undefined (re-run on the check as
+  committed). Under
+  the old double the unset name read `""`, the old guard hid PiP, and the
+  suite was green on the code that has the defect.
+- The new double without `bindingValue`: 5 checks red (D-SRC-49's landed
+  save, D-SINK-103's maintainer case, D-STATE-11's three refusals), because
+  Service.qml's `home` read null and the state folder became
+  `null/.local/state/omarchy-iptv`. That was the harness reading a binding
+  as QML does not, not the service.
+- A fourth case answers undefined for the signature, which no host was
+  seen to answer, so that the reading of any non-string as no session is
+  held: on a guard that asks `signature === null || signature === ""` that
+  case is red (1 failure) and the first three green.
+- On the tree: 4190 checks, 0 failures.
+
+**The cage: pip-scenario's live half.** run.sh's harness_env drops the
+signature toward a nested target (F-HARNESS-47), so after the fix a caged
+pip-scenario finds PiP hidden at P1. harness_env now takes a stand-in,
+`OMARCHY_IPTV_HARNESS_SIGNATURE`, for a nested target only: one word of
+letters, digits, `_` and `-`; refused when the runtime folder the caller
+handed in holds a Hyprland instance of that name (a second layer: under a
+rig's private runtime folder it looks there, not at the session's); ignored
+where qa_target_nested finds the caller's own session (the desk), whose
+signature stays. What keeps it from any compositor is the scratch runtime
+harness_env exports, which holds no `hypr/` (F-HARNESS-48), and the stub
+hyprctl in front. pip-scenario.sh hands it `harness`, in place of its old
+`export HYPRLAND_INSTANCE_SIGNATURE=${HYPRLAND_INSTANCE_SIGNATURE:-harness}`,
+which run.sh dropped toward every nested target. tests/test_harness_display.py
+gained 4 tests: 15 OK on the tree; on a whole `git archive` export of f5fb966
+the three that need the stand-in fail (it reaches a nested target, it is
+refused when it names an instance, it is refused when it is not one word)
+and the desk's passes; on a mutant that takes the stand-in whatever the
+target, the desk's fails alone.
+
+A scratch rig ran pip-scenario.sh live from two exports of the working
+tree, in rewind-scenario's cage_start and cage_stop shape: inside
+private-bus.sh, with a private 0700 runtime folder, TMPDIR and harness
+folder, the player on run.sh's software-GPU lever, and a stand-in
+notification sender that logs a card instead of posting it. No cage arm was
+committed (the row offered either).
+
+| arm | tree | result | transcript |
+|---|---|---|---|
+| A | the fix and the stand-in | 84 passed, 0 failed | pip-20261127-200606-2920029 |
+| B | the fix, pip-scenario's stand-in line removed | 68 passed, 19 failed, from P1 ("the service never decided PiP was available") | pip-20261127-200657-2923208 |
+
+Arm A's shell logged `Unable to find hyprland socket` at both of its starts
+(the stand-in seen, no socket under the scratch runtime folder); arm B's
+logged `$HYPRLAND_INSTANCE_SIGNATURE is unset`. Both counts are
+lane-relsplit4-live's for its shim and for its guard probe (2026-11-24,
+"D-REL-14: C4 merged"). After each arm the cage was gone and no process of
+it was left. The crash journal read 89 before and after each. The one card
+each run posted ("Bar setting ignored") went to the stand-in's log.
+
+**Siblings (rule 15).** Searched every `Quickshell.env(` in the shipped QML,
+the code-behinds and the model: 7 reads besides this one.
+- Guide.qml's and Service.qml's cache-folder loops hand Model.qmlCacheFolder
+  what they read, and it reads each value through envText (model/view.mjs),
+  which takes any non-string as `""`.
+- Service.qml's cacheDir, stateDir and runtimeDir use `||`, which takes null
+  as it takes `""`.
+- debugTiming compares `=== "1"`.
+- `home` is a `string` property, which reads `""` for null, as measured.
+
+None reads an unset name differently from an empty one, except this guard.
+Of the scenarios, only pip-scenario reads PiP state (searched the
+dev-harness scenarios, scripts/qa-*.sh and the a11y probe for PiP, pip and
+the PiP state readers). clip-, key- and logo-scenario's comments say
+"HYPRLAND_INSTANCE_SIGNATURE unset: the service's hyprctl probe stops at
+`which`". That was false until this fix, because the probe went on to
+systeminfo, and it is true now. tests/ held a third double of
+Quickshell.env, inline in the D-SRC-37 (c) PiP watchdog check, which
+answered `"sig"` for every name; it answers it for the signature alone now,
+and null for the rest. Outside the readers of the environment, pipPeek
+(Service-pip.js) runs `hyprctl -j clients` on each player attach whatever
+pipAvailable says (Model.pipDeriveGate gates it on the pid, busy and
+reading only), so with no session the service still runs hyprctl there; it
+fails and reads not in PiP, the old guard's outcome, so it is recorded here
+and not filed (the lead's call).
+
+**The calls.**
+1. The guard reads any non-string as no session, not only null, so a host
+   that answered undefined could not reopen it.
+2. The cage proof is a stand-in on run.sh, for nested targets only, not a
+   committed cage arm. It keeps F-HARNESS-47's drop, and
+   test_harness_display holds it.
+3. No CHANGELOG line: on a real host the outcome was the same (above), so
+   the release notes would name a change no user can see.
+4. recheck-pip8 (read-only, on the uncommitted diff; it ran the display
+   test on the tree and on five mutants of its own, each red) found no
+   blocker and graded its findings should-fix or nit: this section's
+   heading level, the CHANGELOG line, two test labels still saying `""` or
+   undefined, the inline third double, the unheld undefined case, run.sh's
+   comment claiming more than its refusal checks, "ignored on the desk",
+   run.sh's help and the harness README, bindingValue's scope, and pipPeek.
+   Each is taken above or in the code; the evidence it named is kept
+   outside /tmp.

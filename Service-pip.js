@@ -432,9 +432,15 @@
     pipProbeWatchdog.restart()
   }
 
+  // D-PIP-8: no Hyprland session means no PiP. Quickshell.env answers null
+  // for an unset variable and "" only for one set empty (measured on
+  // Quickshell 0.3.2 offscreen, 2026-11-27), so anything but a non-empty
+  // string is no session; the old `=== ""` let an unset one through to
+  // systeminfo, and PiP stayed on offer wherever a hyprctl answered.
   function handlePipWhichExit(exitCode) {
     pipProbeWatchdog.stop()
-    if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
+    var signature = Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+    if (exitCode !== 0 || typeof signature !== "string" || signature === "") {
       root.pipAvailable = false
       return
     }

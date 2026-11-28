@@ -118,7 +118,9 @@
 # OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1 keeps the caller's DISPLAY for what this
 # starts, on the desk only; by default it is dropped, and so is
 # HYPRLAND_INSTANCE_SIGNATURE when WAYLAND_DISPLAY is a nested compositor
-# (F-HARNESS-47; harness_env says why).
+# (F-HARNESS-47; harness_env says why). OMARCHY_IPTV_HARNESS_SIGNATURE=<word>
+# hands a nested target a stand-in signature that names no compositor
+# (D-PIP-8; pip-scenario.sh uses it); the desk ignores it.
 #
 # Everything lives under $OMARCHY_IPTV_HARNESS_DIR (default $XDG_RUNTIME_DIR/omarchy-iptv-harness):
 #   root/     scratch Quickshell config root: shell.qml + Commons/ Ui/ symlinks (the `qs` prefix)
@@ -550,6 +552,29 @@ harness_env() {
   local nested=0
   qa_target_nested "$wl" "$REAL_RUNTIME" && nested=1
   (( nested )) && unset HYPRLAND_INSTANCE_SIGNATURE
+  # D-PIP-8 (2026-11-27): a stand-in signature, for a NESTED target only.
+  # The service reads an unset signature as no Hyprland session and hides
+  # PiP at its first probe, and the line above leaves a nested target none,
+  # so pip-scenario.sh, whose checks need PiP on offer behind its stub
+  # hyprctl, names one in OMARCHY_IPTV_HARNESS_SIGNATURE. It must be one
+  # word of letters, digits, `_` and `-`, and it is refused when the runtime
+  # directory the caller handed in holds a Hyprland instance of that name --
+  # a second layer, which under a rig's private runtime directory looks
+  # there and not at the session's. What keeps it from any compositor is the
+  # scratch runtime this function exports, which holds no `hypr/`
+  # (F-HARNESS-48; prepare_root refuses one), so hyprctl and Quickshell's
+  # Hyprland module find no socket under it whatever it names, and the stub
+  # hyprctl pip-scenario puts in front. Where qa_target_nested finds the
+  # caller's own session (the desk) it is ignored: that session's signature
+  # stays, because there the target IS that instance.
+  local stand_in=${OMARCHY_IPTV_HARNESS_SIGNATURE-}
+  if (( nested )) && [[ -n $stand_in ]]; then
+    [[ $stand_in =~ ^[A-Za-z0-9_-]+$ ]] \
+      || die "OMARCHY_IPTV_HARNESS_SIGNATURE must be one word of letters, digits, _ and - (D-PIP-8)"
+    [[ -e $REAL_RUNTIME/hypr/$stand_in || -L $REAL_RUNTIME/hypr/$stand_in ]] \
+      && die "OMARCHY_IPTV_HARNESS_SIGNATURE names a Hyprland instance under the real runtime directory; a stand-in must name none (D-PIP-8)"
+    export HYPRLAND_INSTANCE_SIGNATURE=$stand_in
+  fi
   if [[ ${OMARCHY_IPTV_HARNESS_KEEP_DISPLAY:-0} == 1 ]]; then
     (( nested )) && die "OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1, and the target $wl is not the session's own compositor: the caller's DISPLAY is another display than the one this harness drives (F-HARNESS-47). Keep it only on the desk."
   else

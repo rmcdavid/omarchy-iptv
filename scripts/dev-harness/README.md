@@ -236,7 +236,12 @@ only, and is refused against a nested compositor), and drops
 the socket named on line 2 of that signature's own
 `$XDG_RUNTIME_DIR/hypr/<signature>/hyprland.lock`, or any process carrying a
 cage's `WLR_BACKENDS` / `WLR_RENDERER` (`qa_target_nested` in
-`scripts/qa-lib.sh`, which `qa_key_skippable` asks too). The scratch runtime
+`scripts/qa-lib.sh`, which `qa_key_skippable` asks too). A nested target can
+be handed a stand-in instead, `OMARCHY_IPTV_HARNESS_SIGNATURE=<word>`
+(D-PIP-8: the service reads an unset signature as no Hyprland session and
+hides PiP, so pip-scenario.sh hands it `harness`); it is refused when the
+runtime folder the caller handed in holds an instance of that name, and
+ignored where the target is the caller's own session. The scratch runtime
 has no `hypr/`: the link that used to sit there "so hyprctl works" never
 did at the default directory (123 bytes to the socket, past `sun_path`'s
 108) and through a shorter one reached the owner's Hyprland. The cage

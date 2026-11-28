@@ -4374,7 +4374,7 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     [{ QML_DISABLE_DISK_CACHE: "0" }, DEF, "0 is not off"],
     [{ QML_DISABLE_DISK_CACHE: "yes" }, DEF, "a word is not a number: the folder is named, which costs a command if Qt read it as off"],
     [{ QML_DISABLE_DISK_CACHE: "" }, DEF, "set to nothing"],
-    [{ QML_DISABLE_DISK_CACHE: 1, QML_DISK_CACHE_PATH: null, XDG_CACHE_HOME: undefined }, DEF, "values that are not strings are unset (Quickshell.env answers undefined)"],
+    [{ QML_DISABLE_DISK_CACHE: 1, QML_DISK_CACHE_PATH: null, XDG_CACHE_HOME: undefined }, DEF, "values that are not strings read as unset (Quickshell.env answers null for an unset name)"],
     // QML_FORCE_DISK_CACHE: Qt asks it before QML_DISABLE_DISK_CACHE (upstream's
     // diskCacheOptions, read, not run), so a forced cache is on whatever the
     // other says; any value but "" counts, because naming a folder Qt does
@@ -4470,7 +4470,7 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     "Run omarchy restart shell",
     "Run omarchy restart shell" + SEP + "if that does not help, remove " + DEF + " and restart again",
   ])
-  checkCall("D-REL-16: the service names the folder for the bar, from its own environment (the harness's Quickshell.env answers \"\": the default)", () => {
+  checkCall("D-REL-16: the service names the folder for the bar, from its own environment (the harness's Quickshell.env answers null for an unset name, as the host does: the default)", () => {
     const H = require("./service-harness.js")
     const h = H.bootService(serviceReader.serviceSet(process.env.IPTV_SERVICE_QML || require("path").join(__dirname, "../Service.qml")), Model,
       { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
@@ -4499,7 +4499,8 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
   }
   const guideFolder = (env, model) => {
     const asked = []
-    const qs = { env: n => { asked.push(n); return Object.prototype.hasOwnProperty.call(env, n) ? env[n] : "" } }
+    // An unset name answers null, as Quickshell 0.3.2 answers it (F-HARNESS-133).
+    const qs = { env: n => { asked.push(n); return Object.prototype.hasOwnProperty.call(env, n) ? env[n] : null } }
     const folder = new Function("Model", "Quickshell", guideBinding("cacheFolder"))(model || Model, qs)
     return { folder, asked }
   }
@@ -25662,7 +25663,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const afterWhich = [wd.running, h.root.pipAvailable]
     // The second half: which answered, systeminfo hangs.
     h.root.runPipProbe(); w.running = false
-    h.ids.Quickshell.env = () => "sig"
+    h.ids.Quickshell.env = n => n === "HYPRLAND_INSTANCE_SIGNATURE" ? "sig" : null
     h.root.handlePipWhichExit(0)
     const rearmed = [i.running, wd.running]
     h.elapse(h.root.helperTimeoutMs)
@@ -25670,6 +25671,29 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     i.running = false; h.root.handlePipInfoExit(1)
     return [armed, firedWhich, afterWhich, rearmed, firedInfo, wd.running, h.root.pipAvailable, h.compileErrors]
   }, [[true, true], [[15], []], [false, false], [true, true], [1, [15]], false, false, []])
+  // D-PIP-8 and F-HARNESS-133 (2026-11-27). Quickshell 0.3.2 answers null
+  // for an unset variable and "" for one set empty (measured offscreen under
+  // gdb); the guard compared `=== ""`, so an unset signature went on to
+  // systeminfo and PiP stayed on offer wherever a hyprctl answered. The
+  // double answered "" for every unset name, so this passed here while the
+  // host failed (rule 10): the first element pins the double to the host.
+  // The fourth run answers undefined for the signature, which no host was
+  // seen to answer: the guard reads any non-string as no session, and a
+  // guard that asked only `=== null` would pass the first three.
+  checkCall("D-PIP-8: an unset Hyprland signature hides PiP at `which` as one set empty does, and only a non-empty one goes on to systeminfo", () => {
+    const run = (env, answer) => {
+      const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA), env ? { env } : {})
+      if (answer) h.ids.Quickshell.env = answer
+      const w = h.ids.hyprWhichProc, i = h.ids.hyprInfoProc
+      h.root.runPipProbe(); w.running = false; i.running = false
+      h.root.pipAvailable = true
+      h.root.handlePipWhichExit(0)
+      const v = h.ids.Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE")
+      return [typeof v === "string" ? v : String(v), h.root.pipAvailable, i.running, h.compileErrors]
+    }
+    return [run(null), run({ HYPRLAND_INSTANCE_SIGNATURE: "" }), run({ HYPRLAND_INSTANCE_SIGNATURE: "sig" }),
+            run(null, n => n === "HYPRLAND_INSTANCE_SIGNATURE" ? undefined : null)]
+  }, [["null", false, false, []], ["", false, false, []], ["sig", true, true, []], ["undefined", false, false, []]])
   // The inventory, as a check rather than a grep in a write-up: every
   // Process the tree declares is named, by `.signal(`, in some Timer's
   // onTriggered -- so the next unbounded slot goes red here.

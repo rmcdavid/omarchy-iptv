@@ -870,7 +870,9 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # tagged length falls back to 4.0.x's sections and a length that is no
 # number is never coerced; 2 of the 14 red on 616061f, 11 on 27e2a84,
 # each of 18 one-decision mutants red; the suite runs 4189.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4189}
+# 2026-11-27, the lead (D-PIP-8): 4189 -> 4190 -- an unset Hyprland
+# signature hides PiP at `which`; red on the old guard (1 failure).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4190}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1545,7 +1547,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4189}
 # sections already read as Arrays is closed at onShellChanged; red on the
 # second code recheck's surviving mutant (a shell closed only when it read
 # no section), 1 failure.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3147}
+# 2026-11-27, the lead (D-PIP-8): 3147 -> 3151 -- run.sh's stand-in
+# signature for a nested target; 3 of the 4 red on f5fb966, the desk's
+# red on a mutant that takes the stand-in whatever the target.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3151}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
