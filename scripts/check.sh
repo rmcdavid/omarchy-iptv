@@ -878,7 +878,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # through the state load, and one check observes that lever (default,
 # "load", "creation", false, a refused word, the variable); red on four
 # mutants of the lever.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4191}
+# 2026-11-28, the daily run (D-A11Y-15): 4191 -> 4192 -- a service the bar
+# is still waiting for is said to be starting; red on 4159ab8's model and
+# on four mutants of the reading.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4192}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -1556,7 +1559,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4191}
 # 2026-11-27, the lead (D-PIP-8): 3147 -> 3151 -- run.sh's stand-in
 # signature for a nested target; 3 of the 4 red on f5fb966, the desk's
 # red on a mutant that takes the stand-in whatever the target.
-PY_TESTS_MIN=${PY_TESTS_MIN:-3151}
+# 3151 -> 3153 on 2026-11-28 (D-A11Y-15, the daily run): the shipping bar
+# widget offscreen with a host that has no service yet -- starting until the
+# first miss, and never "service not loaded" on the way to a service found
+# at the first ask. Red on 4159ab8's widget and on four mutants of the wiring.
+PY_TESTS_MIN=${PY_TESTS_MIN:-3153}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

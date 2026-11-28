@@ -2116,6 +2116,9 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # D-REL-16 (2026-11-25, lane-l3b) adds l3-bar-no-report, the bar's report
 # of its build stamp deleted, which B44 (the BUILD segment) is to be seen
 # red against in the display lane's run.
+# D-A11Y-15 (2026-11-28, the daily run) re-made l3-bar-no-report, whose
+# context the bar's onServiceChanged block moved -- the same decision
+# (tests/test_bar_shown_names.py over it: the reported map is empty).
 is "all twenty key-mutation patches still apply to this tree (git apply --check)" \
    "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval r27a-no-wait r27a-wait-never-released l3-bar-no-report; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
 is "and the key-mutations folder holds exactly those twenty" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "20"

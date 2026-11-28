@@ -38,7 +38,10 @@ BarWidget {
   function reportBuild() {
     if (root.service && typeof root.service.reportBuildStamp === "function") root.service.reportBuildStamp("BarWidget.qml", root.buildStamp)
   }
-  onServiceChanged: root.reportBuild()
+  onServiceChanged: {
+    if (root.service) root.serviceSeen = true
+    root.reportBuild()
+  }
   // What the service says of the build (Model.serviceBuildNotice); a model
   // without the reading beside this file is a mix, so a throw reads "cache".
   readonly property string buildNotice: { try { return Model.serviceBuildNotice(root.service) } catch (e) { return "cache" } }
@@ -68,6 +71,21 @@ BarWidget {
   readonly property bool showChannelNumber: Model.boolSetting(setting("barShowChannelNumber", true))
 
   readonly property bool serviceReady: service !== null
+  // D-A11Y-15. Until the resolve timer's first ask came back empty, a
+  // missing service is one this widget is still waiting for, and the tooltip
+  // and the accessible name say "starting" (Model.barTooltip and
+  // Model.barAccessibleName decide, from these two). `serviceSeen` stays
+  // true once any service was held, so one that goes away later is said to
+  // be missing at once; `resolveMisses` counts the timer's asks that found
+  // none, counted AFTER the ask so a service found on a tick is never
+  // announced as missing on its way in. For the same reason the two
+  // composers are handed `root.service === null` itself and not
+  // `!serviceReady`: `serviceSeen` turns true in onServiceChanged, which can
+  // run before serviceReady's binding has caught up, and the words would
+  // then read "missing, and seen" for that instant (observed offscreen,
+  // 2026-11-28: one "service not loaded" on the way in).
+  property bool serviceSeen: false
+  property int resolveMisses: 0
   readonly property bool playing: serviceReady && service.playing === true
   // F-SINK-14 (2026-10-29): the name as it is SHOWN -- through Model.sinkText,
   // the guide row's rule -- because the label, the tooltip and the
@@ -126,7 +144,8 @@ BarWidget {
   // M2-03 6.4: Model.barTooltip prepends the number to the playing line when
   // `chno` is non-empty, on vertical bars too, where the label is glyph-only.
   readonly property string tooltip: Model.barTooltip({
-    serviceMissing: !root.serviceReady,
+    serviceMissing: root.service === null,
+    serviceSeen: root.serviceSeen, resolveMisses: root.resolveMisses,
     configured: root.configured,
     playing: root.playing,
     name: root.nowPlayingName,
@@ -200,7 +219,8 @@ BarWidget {
   // the build's notice, spoken last.
   Accessible.name: Model.barAccessibleName({ playing: root.playing, name: root.nowPlayingName,
                                              chno: root.nowPlayingChno, error: root.hasError, paused: root.paused,
-                                             behindS: root.behindLiveS, serviceMissing: !root.serviceReady,
+                                             behindS: root.behindLiveS, serviceMissing: root.service === null,
+                                             serviceSeen: root.serviceSeen, resolveMisses: root.resolveMisses,
                                              buildNotice: root.buildNotice, cacheFolder: root.cacheFolder })
 
   // Mirrors WidgetButton: registered click targets keep receiving clicks
@@ -238,6 +258,7 @@ BarWidget {
     onTriggered: {
       tries++
       root.resolveService()
+      if (!root.service) root.resolveMisses++
       if (root.service || tries >= root.resolveTries) resolveTimer.stop()
     }
   }

@@ -6,15 +6,15 @@ does (the reported map is empty).
 
 --- a/BarWidget.qml
 +++ b/BarWidget.qml
-@@ -38,7 +38,6 @@
-   function reportBuild() {
-     if (root.service && typeof root.service.reportBuildStamp === "function") root.service.reportBuildStamp("BarWidget.qml", root.buildStamp)
+@@ -40,7 +40,6 @@ BarWidget {
    }
--  onServiceChanged: root.reportBuild()
+   onServiceChanged: {
+     if (root.service) root.serviceSeen = true
+-    root.reportBuild()
+   }
    // What the service says of the build (Model.serviceBuildNotice); a model
    // without the reading beside this file is a mix, so a throw reads "cache".
-   readonly property string buildNotice: { try { return Model.serviceBuildNotice(root.service) } catch (e) { return "cache" } }
-@@ -220,7 +219,6 @@
+@@ -240,7 +239,6 @@ BarWidget {
    Component.onCompleted: {
      root.syncClickRegistration()
      root.resolveService()

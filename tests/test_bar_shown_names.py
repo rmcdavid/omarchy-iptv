@@ -38,7 +38,7 @@ SHELL = OMARCHY + "/shell"
 # The fake bar and service are host_bar.qml's (tests/a11y), with the name
 # driven from the fixture. Every name is set in turn and read back at once:
 # QML re-evaluates a binding on read, so each reading is that name's.
-PROBE = r"""
+PROBE_HEAD = r"""
 import QtQuick
 import QtQuick.Window
 import "Model.mjs" as Model
@@ -94,6 +94,9 @@ Window {
     for (var i = 0; i < kids.length; i++) drawn(kids[i], out)
     return out
   }
+"""
+
+PROBE = PROBE_HEAD + r"""
   Loader {
     anchors.fill: parent
     source: "BarWidget.qml"
@@ -126,6 +129,60 @@ Window {
 }
 """
 
+# D-A11Y-15. The same fakes, with a host that hands NO service at first: the
+# widget is given its bar, asks, finds none and starts its resolve timer.
+# `late` hands the service only after the timer's first ask came back empty;
+# `tick` has it there for that first ask. Every tooltip the widget ever held
+# and every accessible name, is recorded as it changes, so "never said
+# missing" is a statement about all of them and not about the instants the
+# probe read.
+START_TAIL = r"""
+  property bool handOut: false
+  property var heard: []
+  property var spoken: []
+  property var marks: []
+  readonly property string nameNow: host.widget ? host.widget.Accessible.name : ""
+  onNameNowChanged: if (host.widget) host.spoken.push(host.nameNow)
+  property var widget: null
+  function mark(at) {
+    var item = host.widget
+    host.marks.push({ at: at, tooltip: item.tooltip, accessibleName: item.Accessible.name, misses: item.resolveMisses, seen: item.serviceSeen })
+  }
+  Connections {
+    target: host.widget
+    function onTooltipChanged() { host.heard.push(host.widget.tooltip) }
+  }
+  Loader {
+    anchors.fill: parent
+    source: "BarWidget.qml"
+    onStatusChanged: if (status === Loader.Error) { console.log("BAR_SHOWN_ERROR"); Qt.exit(3) }
+    onLoaded: {
+      host.widget = item
+      item.bar = fakeBar
+      host.heard.push(item.tooltip)
+      host.mark("handed")
+      if ("%(mode)s" === "tick") early.start(); else afterMiss.start()
+    }
+  }
+  // tick: the service is there before the first ask (at resolveMs, 500).
+  Timer { id: early; interval: 200; onTriggered: { host.mark("before the first ask"); host.handOut = true; settled.start() } }
+  // late: one ask has come back empty; the next one finds it.
+  Timer { id: afterMiss; interval: 750; onTriggered: { host.mark("after one miss"); host.handOut = true; settled.start() } }
+  Timer {
+    id: settled
+    interval: 700
+    onTriggered: {
+      host.mark("resolved")
+      host.widget.service = null
+      host.mark("gone")
+      console.log("BAR_SHOWN " + JSON.stringify({ marks: host.marks, heard: host.heard, spoken: host.spoken }))
+      Qt.exit(0)
+    }
+  }
+  Timer { running: true; interval: 20000; onTriggered: { console.log("BAR_SHOWN_TIMEBOX"); Qt.exit(4) } }
+}
+"""
+
 
 class BarShownNamesTest(unittest.TestCase):
 
@@ -137,7 +194,7 @@ class BarShownNamesTest(unittest.TestCase):
         with open(os.path.join(HERE, "fixtures", "shown-names.json"), encoding="utf-8") as fh:
             return json.load(fh)["names"]
 
-    def observe(self, names):
+    def observe(self, names, probe=None):
         work = tempfile.mkdtemp(prefix="omarchy-iptv-bar-")
         self.addCleanup(shutil.rmtree, work, True)
         tree = os.path.join(work, "tree")
@@ -150,7 +207,7 @@ class BarShownNamesTest(unittest.TestCase):
                                   capture_output=True, text=True, timeout=120)
             self.assertEqual(done.returncode, 0, script + ": " + done.stdout[-400:] + done.stderr[-400:])
         with open(os.path.join(tree, "barshown.qml"), "w", encoding="utf-8") as fh:
-            fh.write(PROBE % json.dumps(names))
+            fh.write(probe if probe is not None else PROBE % json.dumps(names))
         env = {"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8", "HOME": home, "XDG_CONFIG_HOME": home + "/.config",
                "XDG_CACHE_HOME": home + "/.cache", "XDG_DATA_HOME": home + "/.local/share",
                "XDG_STATE_HOME": home + "/.local/state", "XDG_RUNTIME_DIR": home,
@@ -201,6 +258,48 @@ class BarShownNamesTest(unittest.TestCase):
                                      "remove ~/.cache/quickshell/qmlcache and restart again",
                           "accessibleName": "IPTV, service not loaded"},
                          got["none"])
+
+    def start_probe(self, mode):
+        hand = "function serviceFor(id) { return fakeService }"
+        self.assertEqual(1, PROBE_HEAD.count(hand))
+        head = (PROBE_HEAD % "[]").replace(hand, "function serviceFor(id) { return host.handOut ? fakeService : null }")
+        return self.observe([], head + START_TAIL % {"mode": mode})
+
+    def test_a_service_the_bar_waits_for_is_starting_until_the_first_miss(self):
+        """D-A11Y-15, observed on the SHIPPING widget: handed a bar whose host
+        has no service yet, it says it is starting; once its timer has asked
+        and found none it says the service is not loaded; when the service
+        comes it says what the service says; and a service that then goes
+        away is missing at once, never starting again."""
+        got = self.start_probe("late")
+        sep = " \u00b7 "
+        gone = {"tooltip": "IPTV" + sep + "service not loaded, run omarchy restart shell\nIf that does not help, "
+                           "remove ~/.cache/quickshell/qmlcache and restart again",
+                "accessibleName": "IPTV, service not loaded"}
+        self.assertEqual([
+            dict(at="handed", tooltip="IPTV" + sep + "starting\u2026", accessibleName="IPTV, starting", misses=0, seen=False),
+            dict(gone, at="after one miss", misses=1, seen=False),
+            dict(at="resolved", tooltip="IPTV" + sep + "click to open the guide", accessibleName="IPTV, idle", misses=1, seen=True),
+            dict(gone, at="gone", misses=1, seen=True),
+        ], got["marks"])
+        self.assertEqual(["IPTV, starting", "IPTV, service not loaded", "IPTV, idle", "IPTV, service not loaded"], got["spoken"])
+
+    def test_a_service_found_at_the_first_ask_is_never_said_to_be_missing(self):
+        """D-A11Y-15: the miss is counted AFTER the ask, so a service the
+        timer's first ask finds takes the bar from starting to its own words
+        with no "service not loaded" between -- over every tooltip the widget
+        held, through its own change signal -- until the service really goes."""
+        got = self.start_probe("tick")
+        sep = " \u00b7 "
+        self.assertEqual([("handed", "IPTV, starting", 0, False), ("before the first ask", "IPTV, starting", 0, False),
+                          ("resolved", "IPTV, idle", 0, True), ("gone", "IPTV, service not loaded", 0, True)],
+                         [(m["at"], m["accessibleName"], m["misses"], m["seen"]) for m in got["marks"]])
+        heard = got["heard"]
+        self.assertEqual("IPTV" + sep + "starting\u2026", heard[0])
+        self.assertIn("IPTV" + sep + "click to open the guide", heard)
+        self.assertEqual([], [t for t in heard[:-1] if "service not loaded" in t], heard)
+        self.assertIn("service not loaded", heard[-1])
+        self.assertEqual(["IPTV, starting", "IPTV, idle", "IPTV, service not loaded"], got["spoken"])
 
 
 if __name__ == "__main__":

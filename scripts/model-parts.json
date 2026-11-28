@@ -911,6 +911,7 @@
         "buildNoticeKind",
         "serviceMissingProse",
         "barGlyph",
+        "barServiceStarting",
         "barTooltip",
         "barAccessibleName",
         "buildSpoken",

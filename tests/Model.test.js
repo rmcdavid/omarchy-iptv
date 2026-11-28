@@ -4446,6 +4446,31 @@ checkCall("D-HOST-2: the guide's open() asks the service to re-read the manifest
     [Model.barAccessibleName({ serviceMissing: true }), Model.barAccessibleName({ serviceMissing: true, playing: true, name: "BBC One", buildNotice: "cache" }),
      Model.barAccessibleName({}), Model.barAccessibleName({ serviceMissing: false })],
     ["IPTV, service not loaded", "IPTV, service not loaded", "IPTV, idle", "IPTV, idle"])
+  // D-A11Y-15 (2026-11-28). Until the widget's resolve timer has asked once
+  // and found none, a missing service is one the bar is still waiting for:
+  // it said "service not loaded", with the cache step, for the first half
+  // second of every start. The words wait for the first miss; a widget that
+  // ever held a service, a count that is not the number 0, and a widget from
+  // before the fix (neither field) all read as missing, as they did. Red on
+  // 4159ab8's model: the two starting readings read as missing.
+  checkCall("D-A11Y-15: a service the bar is still waiting for is said to be starting, in the tooltip and the name, and every other reading of a missing one says what it said", () => {
+    const both = (o) => [Model.barTooltip(o), Model.barAccessibleName(o)]
+    const GONE = ["IPTV" + SEP + "service not loaded, run omarchy restart shell\nIf that does not help, remove " + DEF + " and restart again", "IPTV, service not loaded"]
+    const same = (o) => { const got = both(o); return got[0] === GONE[0] && got[1] === GONE[1] ? "missing" : got }
+    return { waiting: both({ serviceMissing: true, serviceSeen: false, resolveMisses: 0 }),
+             waitingWhateverElse: both({ serviceMissing: true, serviceSeen: false, resolveMisses: 0, playing: true, name: "BBC One", buildNotice: "cache", pip: true }),
+             missed: [1, 2, 20].map(n => same({ serviceMissing: true, serviceSeen: false, resolveMisses: n })),
+             seen: same({ serviceMissing: true, serviceSeen: true, resolveMisses: 0 }),
+             oldWidget: same({ serviceMissing: true }),
+             unreadable: [{ resolveMisses: 0 }, { serviceSeen: false }, { serviceSeen: false, resolveMisses: "0" }, { serviceSeen: false, resolveMisses: null },
+                          { serviceSeen: false, resolveMisses: NaN }, { serviceSeen: false, resolveMisses: -1 }, { serviceSeen: 0, resolveMisses: 0 },
+                          { serviceSeen: null, resolveMisses: 0 }].map(o => same(Object.assign({ serviceMissing: true }, o))),
+             ready: both({ serviceMissing: false, serviceSeen: false, resolveMisses: 0, configured: true }) }
+  }, { waiting: ["IPTV" + SEP + "starting" + Model.ELLIPSIS, "IPTV, starting"],
+       waitingWhateverElse: ["IPTV" + SEP + "starting" + Model.ELLIPSIS, "IPTV, starting"],
+       missed: ["missing", "missing", "missing"], seen: "missing", oldWidget: "missing",
+       unreadable: ["missing", "missing", "missing", "missing", "missing", "missing", "missing", "missing"],
+       ready: ["IPTV" + SEP + "click to open the guide", "IPTV, idle"] })
   checkCall("D-REL-16: the bar's accessible name speaks the notice last, the step and never the folder", () => [
     Model.barAccessibleName({ buildNotice: "restart" }),
     Model.barAccessibleName({ buildNotice: "cache" }),

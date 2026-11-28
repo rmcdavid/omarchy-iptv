@@ -97,7 +97,11 @@ Window {
       // Readback of the shipping widget's own derived state, so an
       // assertion about what the bus says can be paired with what the
       // widget actually holds. Printed as one line the checker parses.
-      Qt.callLater(function() {
+      // D-A11Y-15: with no service the widget says it is starting until its
+      // resolve timer's first ask came back empty, and "service not loaded"
+      // from then on, which is the state L2-BAR-08 reads; so that scenario
+      // reports only once that ask is behind it.
+      var report = function() {
         console.warn("BAR_READBACK " + JSON.stringify({
           scenario: host.scenario,
           glyph: item.glyph,
@@ -111,9 +115,12 @@ Window {
           tooltip: item.tooltip
         }))
         console.warn("BAR_HOST_READY")
-      })
+      }
+      if (host.scenario === "noservice") { afterFirstMiss.interval = item.resolveMs + 250; afterFirstMiss.report = report; afterFirstMiss.start() }
+      else Qt.callLater(report)
     }
   }
+  Timer { id: afterFirstMiss; property var report: null; repeat: false; onTriggered: if (report) report() }
 
   // Timebox: the probe exits on its own even if the checker dies.
   Timer { running: true; interval: 25000; onTriggered: { console.warn("BAR_TIMEBOX"); Qt.exit(0) } }

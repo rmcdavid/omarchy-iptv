@@ -142,8 +142,28 @@ function barGlyph(opts) {
 // glyph stays as it is, because PiP is a window state and the bar already
 // carries playback truth. PIP9: the line says the window is in PiP, never
 // that it is on top of anything.
+// D-A11Y-15. Whether the bar's missing service is one it is still WAITING
+// for. The service can be created after the bar's widget, so the widget asks
+// for it again on a timer (BarWidget.qml's resolveTimer, every 500 ms), and
+// until the first of those asks came back empty the widget cannot tell a
+// service that is a moment late from one that never loaded. In that window
+// it said "service not loaded", with the cache step, at every enable and
+// every start (8 of 8 enable marks in a nested cage, 2026-11-25). So it says
+// it is starting instead, and the no-service words wait for the first miss.
+// Exactly these two readings and nothing looser: a widget that has ever held
+// a service (`serviceSeen` true), a count that is not the number 0, and a
+// widget from before this fix (it hands neither field) all read as missing,
+// which is what every one of them said before. So a new model beside an old
+// widget, and an old model beside a new widget (it ignores the fields), both
+// say what 0.20.0 said (D-REL-16's mixes).
+function barServiceStarting(o) {
+  return o.serviceSeen === false && o.resolveMisses === 0
+}
+
 function barTooltip(opts) {
   var o = opts || {}
+  // D-A11Y-15: a service the widget is still waiting for is not a missing one.
+  if (o.serviceMissing && barServiceStarting(o)) return "IPTV" + SEP + "starting" + ELLIPSIS
   // D-REL-16: and a second line, the cache, always the default folder: with
   // no service there is nothing to ask where it is (BarWidget.qml imports no
   // Quickshell of its own).
@@ -192,6 +212,8 @@ function barAccessibleName(opts) {
   var o = opts || {}
   // D-A11Y-14: with no service the bar says so, as its tooltip does; it said
   // "IPTV, idle" until 2026-11-25.
+  // D-A11Y-15: unless the widget is still waiting for it (barServiceStarting).
+  if (o.serviceMissing === true && barServiceStarting(o)) return "IPTV, starting"
   if (o.serviceMissing === true) return "IPTV, service not loaded"
   return barAccessibleState(o) + buildSpoken(o)
 }
@@ -911,10 +933,10 @@ function motionMs(style, ms) {
 export {
   BUILD_STAMP_VIEW, QML_CACHE_DEFAULT, QML_CACHE_ENV, envText, qmlCacheFolder,
   cacheFolderOr, BUILD_UPDATED, BUILD_LOADED_MID, BUILD_RESTART_TAIL,
-  buildNoticeKind, serviceMissingProse, barGlyph, barTooltip,
-  barAccessibleName, buildSpoken, barAccessibleState, ipcNowPlaying, ipcJson,
-  guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
-  arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
-  hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
-  keyboardMap, keyboardMapKeys, motionMs
+  buildNoticeKind, serviceMissingProse, barGlyph, barServiceStarting,
+  barTooltip, barAccessibleName, buildSpoken, barAccessibleState,
+  ipcNowPlaying, ipcJson, guideSurface, firstRunAllowed, footerCounts,
+  footerDegraded, footerStatus, arrowVerb, footerHints, scopeVerb, formHints,
+  keyboardMapUntabled, hideMeaning, escapeOutcome, sameEscape, verbForKey,
+  setKeyRow, mergeKeyRows, keyboardMap, keyboardMapKeys, motionMs
 }
