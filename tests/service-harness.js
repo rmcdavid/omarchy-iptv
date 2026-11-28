@@ -553,6 +553,121 @@ function hostBarSections(utilText) {
 }
 const INSTALLED_BAR_SECTIONS = hostBarSections(fs.readFileSync(path.join(HOST_SHELL, "Commons", "Util.qml"), "utf8"))
 
+// F-HARNESS-136 (2026-11-28). The bar config in the form a FRESH
+// PluginShellApi carries it (D-HOST-15): createObject's property map hands
+// the service Qt's own wrappers, a V4ReferenceObject for the config, the
+// layout and each entry and a V4Sequence for each section, until the host's
+// next syncPluginApis assigns a parsed copy. These doubles are those wrappers
+// as lane-dh15m measured them in the host's own shell.qml and NOTHING MORE
+// (rule 10): every operation the measurement did not see answered throws.
+// tests/Model.test.js ("D-HOST-15 (the doubles, rule 10)") pins what they
+// answer and holds the account of the measurement. They were that block's
+// own; they are here so bootService can start EVERY service in this form
+// (Host's `fresh`), where only one hand-swapped check met the window.
+const V4 = (function () {
+  const refuse = (what, key) => { throw new Error("V4 double: " + what + " " + String(key) + " was not measured") }
+  const own = (o, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k)
+  // A V4ReferenceObject over `fields`. `absent` says whether a key it lacks
+  // reads as undefined (the layout: tray was read so) or throws. `proto`,
+  // another such double, is its prototype: a read the wrapper lacks goes on
+  // to it, and for...in walks it (protoForm below).
+  const fieldsOf = new WeakMap()
+  // A wrapper with no `proto` answers its prototype as V4 answered a plain
+  // entry's (qmltestrunner on Qt 6.12.0, lane-dh15fix2's probe, `map:normal`):
+  // an object that is NOT Object.prototype, whose tag is [object Object] and
+  // which has no own name -- where this double first answered Object.prototype
+  // itself, kinder than V4 to a plainness test (the second code recheck).
+  const refObject = (fields, absent, proto) => {
+    let staged = null, listing = null, json = false
+    const standIn = Object.create(Object.prototype)
+    const lends = key => proto !== undefined && own(fieldsOf.get(proto), key)
+    const wrapper = new Proxy({}, {
+      get(t, key) {
+        if (key === Symbol.toStringTag) return "V4ReferenceObject"
+        // JSON.stringify's first ask of an object; what it asks next is
+        // answered only after it.
+        if (key === "toJSON") { json = true; return own(fields, key) ? fields[key] : undefined }
+        if (own(fields, key)) return fields[key]
+        if (lends(key)) return proto[key]
+        if (absent === true && typeof key === "string") return undefined
+        return refuse("a read of", key)
+      },
+      ownKeys() {
+        const keys = Object.keys(fields)
+        if (json) { json = false; listing = keys.length ? keys.slice() : null } else staged = keys
+        return keys.slice()
+      },
+      getPrototypeOf() {
+        if (staged !== null) { listing = staged.length ? staged : null; staged = null }
+        return proto !== undefined ? proto : standIn
+      },
+      getOwnPropertyDescriptor(t, key) {
+        if (listing !== null && listing[0] === key) {
+          listing.shift()
+          if (listing.length === 0) listing = null
+          return { value: fields[key], writable: true, enumerable: true, configurable: true }
+        }
+        // for...in then asks whether the wrapper shadows each key its
+        // prototype lends (protoForm's, or a polluted Object.prototype's):
+        // it does not.
+        if (!own(fields, key) && (lends(key) || (typeof key === "string" && Object.prototype.propertyIsEnumerable.call(Object.prototype, key)))) return undefined
+        staged = null
+        return refuse("a property descriptor (hasOwnProperty, Object.keys) of", key)
+      },
+      has(t, key) { return refuse("`in` of", key) },
+      set(t, key) { return refuse("a write of", key) },
+      defineProperty(t, key) { return refuse("a define of", key) },
+      deleteProperty(t, key) { return refuse("a delete of", key) }
+    })
+    fieldsOf.set(wrapper, fields)
+    return wrapper
+  }
+  // An entry whose shell.json text holds a `__proto__` key, as V4 makes it
+  // when it crosses createObject's property map (qmltestrunner on Qt 6.12.0,
+  // the host's Qt, lane-dh15fix2's probe, 2026-11-27): a wrapper with NO own
+  // field -- Object.keys and getOwnPropertyNames empty, JSON.stringify `{}`
+  // -- whose prototype, another V4ReferenceObject, holds the entry's fields
+  // merged with the nested object's. `{"id":<ours>,"__proto__":{"polluted":
+  // true,"id":"x"},"maxRecents":25}` read id (ours), polluted (true) and
+  // maxRecents (25) through it, for...in listing them in that order;
+  // `{"__proto__":{"id":<ours>},"maxRecents":5}` read our id and 5. The
+  // Array form (after syncPluginApis' JSON.parse) holds `__proto__` as an
+  // own key instead and reads neither the nested fields nor a nested id.
+  const protoForm = (merged) => refObject({}, false, refObject(merged))
+  // A V4Sequence over `items`.
+  const sequence = (items) => {
+    const n = items.length
+    const at = key => typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key) ? Number(key) : -1
+    return new Proxy({}, {
+      get(t, key) {
+        if (key === Symbol.toStringTag) return "V4Sequence"
+        if (key === "length") return n
+        if (key === Symbol.iterator) return function* () { for (let i = 0; i < n; i++) yield items[i] }
+        const i = at(key)
+        if (i >= 0 && i < n) return items[i]
+        return refuse("a read of", key)
+      },
+      // Array.prototype.slice.call asks HasProperty of each index below the length.
+      has(t, key) { const i = at(key); return i >= 0 && i < n ? true : refuse("`in` of", key) },
+      ownKeys() { return refuse("the keys of", "a sequence") },
+      getOwnPropertyDescriptor(t, key) { return refuse("a property descriptor of", key) },
+      set(t, key) { return refuse("a write of", key) },
+      defineProperty(t, key) { return refuse("a define of", key) },
+      deleteProperty(t, key) { return refuse("a delete of", key) }
+    })
+  }
+  // A plain bar config as createObject's property map leaves it.
+  const fresh = (bar) => {
+    const layout = {}
+    for (const s of Object.keys(bar.layout || {})) {
+      const list = bar.layout[s]
+      layout[s] = Array.isArray(list) ? sequence(list.map(e => e && typeof e === "object" ? refObject(Object.assign({}, e)) : e)) : list
+    }
+    return refObject({ layout: refObject(layout, true) })
+  }
+  return { refObject, protoForm, sequence, fresh }
+})()
+
 // The host, both shapes rule 9 names: "lag" publishes the bar one write
 // behind (through 4.0.4), "echo" at once (omacom/omarchy#15082).
 //
@@ -566,6 +681,12 @@ const INSTALLED_BAR_SECTIONS = hostBarSections(fs.readFileSync(path.join(HOST_SH
 // HarnessLib.hostUpdateEntry, the mirror the dev harness's fake shell runs
 // too, held to the installed host's own text by tests/Model.test.js. The
 // double used to write `right[0]` and nothing else.
+// IPTV_HARNESS_FRESH chooses the form for a whole run, as an option does for
+// one boot: "load" (the default), "creation", or "none" for false.
+function freshDefault() {
+  const v = process.env.IPTV_HARNESS_FRESH
+  return v === undefined || v === "" ? "load" : v === "none" ? false : v
+}
 class Host {
   constructor(entry, mode, kit) {
     const k = kit || {}
@@ -579,11 +700,31 @@ class Host {
     layout[this.section].push(k.bare === true ? PID : Object.assign({ id: PID }, entry || {}))
     this.stored = { bar: { layout }, plugins: [] }
     this.published = clone(this.stored.bar)
+    // F-HARNESS-136: what a service reads between its creation and the
+    // host's next syncPluginApis. "load" (the default): the fresh API's
+    // wrappers until the host's first assign, so the state load falls in
+    // the window (D-HOST-15's worst case, and the form that sees a reading
+    // go wrong: a sequence read as absent turned 186 checks red here and 11
+    // in the Array form, 2026-11-28). "creation": the wrappers until
+    // bootService's sync, before the state load, the order the host was
+    // measured to keep; the gate's second node run boots this way. false:
+    // the Array form from the start, which no service on a 4.5.0 host meets.
+    this.fresh = k.fresh === undefined ? freshDefault() : k.fresh
+    this.syncs = 0
+    if (this.fresh !== false && this.fresh !== "creation" && this.fresh !== "load") throw new Error("service-harness: fresh takes \"creation\", \"load\" or false")
+    if (this.fresh !== false) this.published = V4.fresh(this.published)
     this.onPublish = null
     this.writes = []
     this.answers = []
   }
   get barConfig() { return this.published }
+  // syncPluginApis with nothing stored anew: the parsed copy replaces the
+  // fresh API's wrappers and the bar config's change is raised.
+  sync() {
+    this.syncs++
+    this.published = clone(this.stored.bar)
+    if (this.onPublish) this.onPublish()
+  }
   // The entry as stored, wherever it was placed -- also in a section this
   // host does not walk (an entry 4.5.0's migration moved, on 4.0.x).
   storedEntry() {
@@ -986,7 +1127,7 @@ function bootService(svc, Model, o) {
               privateRuns: [], privateHang: false, privateAnswer: null }
   // F-HARNESS-100: `section`, `bare` and `barSections` (own key, undefined
   // allowed: the 4.0.x kit) place the entry and choose the host's kit.
-  const kit = { section: opts.section, bare: opts.bare }
+  const kit = { section: opts.section, bare: opts.bare, fresh: opts.fresh }
   if (Object.prototype.hasOwnProperty.call(opts, "barSections")) kit.barSections = opts.barSections
   h.host = new Host(opts.entry, opts.host || "lag", kit)
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
@@ -1529,6 +1670,12 @@ function bootService(svc, Model, o) {
   if (typeof root.startStartupCheck === "function") root.startStartupCheck()
   else ids.mkdirProc.running = true
   root.reconcile()
+  // F-HARNESS-136: the host's next syncPluginApis, which assigns the parsed
+  // copy (the Array form) and raises the bar config's change. On the host's
+  // own order it comes before the state loads (110 of 110 creations,
+  // lane-dh15m), so that is where "creation" ends the window; "load" leaves
+  // it open through the load, until the host's first assign.
+  if (h.host.fresh === "creation") h.host.sync()
   // `beforeLoad(h)`: the start-up window before stateFile's first load --
   // what a guide opened at once meets (the round-5 lens's window).
   if (opts.beforeLoad) { opts.beforeLoad(h); h.runLater() }
@@ -1638,5 +1785,5 @@ function restartService(svc, Model, h, o) {
                                                           section: h.host.section, bare, barSections: h.host.barSections }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, ipcFunctions, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView,
+module.exports = { V4, bootService, restartService, rootFunctions, rootProperties, ipcFunctions, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView,
                    hostBarSections, INSTALLED_BAR_SECTIONS, HOST_SHELL }

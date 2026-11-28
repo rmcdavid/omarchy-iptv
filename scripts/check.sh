@@ -385,7 +385,8 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # R23c's eight harness pins (the watchdog armed; a timed-out init over a
 # file that is not one and one that does not parse; a timeout after the
 # load) and two model pins, R23e's three and R23f's one. The node suite now
-# also runs a second time with IPTV_HARNESS_OWN_ECHO=none (R23g), same count.
+# also runs a second time with IPTV_HARNESS_OWN_ECHO=none (R23g), same count
+# (and, since F-HARNESS-136, with IPTV_HARNESS_FRESH=creation beside it).
 # 2372 -> 2459 on 2026-10-14, round 14 (R24): the merge fixture table (34
 # cases of tests/fixtures/state-merge.json, its coverage check, the two
 # identities over every case, sameState and the conflict line: 38), the
@@ -872,7 +873,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-114}
 # each of 18 one-decision mutants red; the suite runs 4189.
 # 2026-11-27, the lead (D-PIP-8): 4189 -> 4190 -- an unset Hyprland
 # signature hides PiP at `which`; red on the old guard (1 failure).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4190}
+# 2026-11-28, the daily run (F-HARNESS-136): 4190 -> 4191 -- the service
+# harness boots every service with its bar config in the fresh API's form
+# through the state load, and one check observes that lever (default,
+# "load", "creation", false, a refused word, the variable); red on four
+# mutants of the lever.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-4191}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -2140,8 +2146,13 @@ if command -v node >/dev/null 2>&1; then
   # scripts/dev-harness/spikes/filewatch/. The harness delivers it by
   # default; this run delivers it never, so a pin that holds only because
   # the echo arrived goes red here. Same suite, same count.
+  # F-HARNESS-136 (2026-11-28). This run also boots every service in the
+  # host's usual order, IPTV_HARNESS_FRESH=creation: the fresh API's
+  # wrappers end at the host's sync BEFORE the state load, where the first
+  # run keeps them through it. A check red here alone names one of the two
+  # levers; run it with each variable alone to tell which.
   node_log2="$CHECK_TMP/node-no-echo.log"
-  if IPTV_HARNESS_OWN_ECHO=none node "$ROOT/tests/Model.test.js" >"$node_log2" 2>&1; then
+  if IPTV_HARNESS_OWN_ECHO=none IPTV_HARNESS_FRESH=creation node "$ROOT/tests/Model.test.js" >"$node_log2" 2>&1; then
     node_checks2=$(grep -oE '^[0-9]+ checks' "$node_log2" | head -1 | grep -oE '^[0-9]+')
     if [[ -z $node_checks2 || $node_checks2 != "${node_checks:-}" ]]; then
       bad "node tests without the own-write echo ran ${node_checks2:-no} checks, against ${node_checks:-no} with it"

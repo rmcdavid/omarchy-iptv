@@ -27239,106 +27239,10 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const PID = "io.github.rmcdavid.iptv"
   const installed = H.hostBarSections(fs.readFileSync(path.join(H.HOST_SHELL, "Commons", "Util.qml"), "utf8"))
   const sections = Array.isArray(installed) ? installed.slice() : ["left", "center", "right"]
-  const refuse = (what, key) => { throw new Error("V4 double: " + what + " " + String(key) + " was not measured") }
-  const own = (o, k) => typeof k === "string" && Object.prototype.hasOwnProperty.call(o, k)
-  // A V4ReferenceObject over `fields`. `absent` says whether a key it lacks
-  // reads as undefined (the layout: tray was read so) or throws. `proto`,
-  // another such double, is its prototype: a read the wrapper lacks goes on
-  // to it, and for...in walks it (protoForm below).
-  const fieldsOf = new WeakMap()
-  // A wrapper with no `proto` answers its prototype as V4 answered a plain
-  // entry's (qmltestrunner on Qt 6.12.0, lane-dh15fix2's probe, `map:normal`):
-  // an object that is NOT Object.prototype, whose tag is [object Object] and
-  // which has no own name -- where this double first answered Object.prototype
-  // itself, kinder than V4 to a plainness test (the second code recheck).
-  const refObject = (fields, absent, proto) => {
-    let staged = null, listing = null, json = false
-    const standIn = Object.create(Object.prototype)
-    const lends = key => proto !== undefined && own(fieldsOf.get(proto), key)
-    const wrapper = new Proxy({}, {
-      get(t, key) {
-        if (key === Symbol.toStringTag) return "V4ReferenceObject"
-        // JSON.stringify's first ask of an object; what it asks next is
-        // answered only after it.
-        if (key === "toJSON") { json = true; return own(fields, key) ? fields[key] : undefined }
-        if (own(fields, key)) return fields[key]
-        if (lends(key)) return proto[key]
-        if (absent === true && typeof key === "string") return undefined
-        return refuse("a read of", key)
-      },
-      ownKeys() {
-        const keys = Object.keys(fields)
-        if (json) { json = false; listing = keys.length ? keys.slice() : null } else staged = keys
-        return keys.slice()
-      },
-      getPrototypeOf() {
-        if (staged !== null) { listing = staged.length ? staged : null; staged = null }
-        return proto !== undefined ? proto : standIn
-      },
-      getOwnPropertyDescriptor(t, key) {
-        if (listing !== null && listing[0] === key) {
-          listing.shift()
-          if (listing.length === 0) listing = null
-          return { value: fields[key], writable: true, enumerable: true, configurable: true }
-        }
-        // for...in then asks whether the wrapper shadows each key its
-        // prototype lends (protoForm's, or a polluted Object.prototype's):
-        // it does not.
-        if (!own(fields, key) && (lends(key) || (typeof key === "string" && Object.prototype.propertyIsEnumerable.call(Object.prototype, key)))) return undefined
-        staged = null
-        return refuse("a property descriptor (hasOwnProperty, Object.keys) of", key)
-      },
-      has(t, key) { return refuse("`in` of", key) },
-      set(t, key) { return refuse("a write of", key) },
-      defineProperty(t, key) { return refuse("a define of", key) },
-      deleteProperty(t, key) { return refuse("a delete of", key) }
-    })
-    fieldsOf.set(wrapper, fields)
-    return wrapper
-  }
-  // An entry whose shell.json text holds a `__proto__` key, as V4 makes it
-  // when it crosses createObject's property map (qmltestrunner on Qt 6.12.0,
-  // the host's Qt, lane-dh15fix2's probe, 2026-11-27): a wrapper with NO own
-  // field -- Object.keys and getOwnPropertyNames empty, JSON.stringify `{}`
-  // -- whose prototype, another V4ReferenceObject, holds the entry's fields
-  // merged with the nested object's. `{"id":<ours>,"__proto__":{"polluted":
-  // true,"id":"x"},"maxRecents":25}` read id (ours), polluted (true) and
-  // maxRecents (25) through it, for...in listing them in that order;
-  // `{"__proto__":{"id":<ours>},"maxRecents":5}` read our id and 5. The
-  // Array form (after syncPluginApis' JSON.parse) holds `__proto__` as an
-  // own key instead and reads neither the nested fields nor a nested id.
-  const protoForm = (merged) => refObject({}, false, refObject(merged))
-  // A V4Sequence over `items`.
-  const sequence = (items) => {
-    const n = items.length
-    const at = key => typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key) ? Number(key) : -1
-    return new Proxy({}, {
-      get(t, key) {
-        if (key === Symbol.toStringTag) return "V4Sequence"
-        if (key === "length") return n
-        if (key === Symbol.iterator) return function* () { for (let i = 0; i < n; i++) yield items[i] }
-        const i = at(key)
-        if (i >= 0 && i < n) return items[i]
-        return refuse("a read of", key)
-      },
-      // Array.prototype.slice.call asks HasProperty of each index below the length.
-      has(t, key) { const i = at(key); return i >= 0 && i < n ? true : refuse("`in` of", key) },
-      ownKeys() { return refuse("the keys of", "a sequence") },
-      getOwnPropertyDescriptor(t, key) { return refuse("a property descriptor of", key) },
-      set(t, key) { return refuse("a write of", key) },
-      defineProperty(t, key) { return refuse("a define of", key) },
-      deleteProperty(t, key) { return refuse("a delete of", key) }
-    })
-  }
-  // A plain bar config as createObject's property map leaves it.
-  const fresh = (bar) => {
-    const layout = {}
-    for (const s of Object.keys(bar.layout || {})) {
-      const list = bar.layout[s]
-      layout[s] = Array.isArray(list) ? sequence(list.map(e => e && typeof e === "object" ? refObject(Object.assign({}, e)) : e)) : list
-    }
-    return refObject({ layout: refObject(layout, true) })
-  }
+  // The doubles themselves live in tests/service-harness.js since
+  // F-HARNESS-136 (2026-11-28), where bootService hands them to every
+  // service it boots; the check below still pins what they answer.
+  const { refObject, protoForm, sequence, fresh } = H.V4
   const ENTRY = { playlistUrl: "http://a.example.test/list.m3u", maxRecents: 25, refreshMinutes: 120, showLogos: true, mpvArgs: "--volume=40", pipCorner: "bottom-left", user_note: "kept" }
   const layoutWith = (section, entry) => {
     const layout = {}
@@ -27506,8 +27410,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const F = JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents, lastPlayed: recents[0], session: null, sources: [], savedSearches: [], hiddenGroups: [] }) + "\n"
   checkCall("D-HOST-15 (service): with the bar config in the fresh API's form at the state load, the service reads its entry -- 15 recents kept under maxRecents 25, the playlist adopted with the marker, and the entry written through the host with sourceKey and every other field kept", () => {
     let atLoad = null
-    const h = H.bootService(svcSet, M, { entry: Object.assign({}, ENTRY), stateText: F, host: "echo",
-      beforeLoad: (hh) => { hh.host.published = fresh(hh.host.published); atLoad = [util.types.isProxy(hh.root.shell.barConfig), hh.root.maxRecents, hh.root.settings.playlistUrl !== ""] } })
+    const h = H.bootService(svcSet, M, { entry: Object.assign({}, ENTRY), stateText: F, host: "echo", fresh: "load",
+      beforeLoad: (hh) => { atLoad = [util.types.isProxy(hh.root.shell.barConfig), hh.root.maxRecents, hh.root.settings.playlistUrl !== ""] } })
     const r = h.root
     const file = h.file()
     const stored = h.storedEntry() || {}
@@ -27519,6 +27423,33 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
              compileErrors: h.compileErrors }
   }, { atLoad: [true, 25, true], maxRecents: 25, recents: [15, 15], migrated: [true, true, 1, "http://a.example.test/list.m3u", true],
        stored: [true, true, 25, 120, "kept", "--volume=40"], refused: 0, compileErrors: [] })
+  // F-HARNESS-136 (2026-11-28). The harness's own lever, observed (rule 11):
+  // which form the service's bar config has at its creation's end, where
+  // `beforeLoad` runs, and after its first own write reached the host, and
+  // how many syncs the double's host made. "load", the default, keeps the
+  // wrappers through the state load until the host's first assign;
+  // "creation" ends them at the host's sync before the load, the order the
+  // host was measured to keep; false is the Array form from the start, which
+  // every boot was until this. Red when the default is "creation" or false,
+  // when "creation" makes no sync, and when "load" makes one.
+  checkCall("F-HARNESS-136: bootService starts a service with its bar config in the fresh API's form -- through the state load by default, until the host's sync before it for \"creation\", never for false -- and refuses any other word", () => {
+    const one = (o) => {
+      let before = null
+      const h = H.bootService(svcSet, M, Object.assign({ entry: Object.assign({}, ENTRY), stateText: F, host: "echo",
+        beforeLoad: (hh) => { before = util.types.isProxy(hh.root.shell.barConfig) } }, o))
+      return [before, util.types.isProxy(h.root.shell.barConfig), h.host.syncs, h.root.maxRecents, h.compileErrors.length]
+    }
+    const keep = process.env.IPTV_HARNESS_FRESH
+    delete process.env.IPTV_HARNESS_FRESH
+    try {
+      const byEnv = (v) => { process.env.IPTV_HARNESS_FRESH = v; try { return one({})[0] } catch (e) { return /fresh takes/.test(e.message) ? "refused" : "threw " + e.message } finally { delete process.env.IPTV_HARNESS_FRESH } }
+      let bad = "accepted"
+      try { one({ fresh: "always" }) } catch (e) { bad = /fresh takes/.test(e.message) ? "refused" : "threw " + e.message }
+      return { byDefault: one({}), load: one({ fresh: "load" }), creation: one({ fresh: "creation" }), off: one({ fresh: false }), bad,
+               env: [byEnv("load"), byEnv("creation"), byEnv("none"), byEnv("yes")] }
+    } finally { if (keep !== undefined) process.env.IPTV_HARNESS_FRESH = keep }
+  }, { byDefault: [true, false, 0, 25, 0], load: [true, false, 0, 25, 0], creation: [false, false, 1, 25, 0], off: [false, false, 0, 25, 0], bad: "refused",
+       env: [true, false, false, "refused"] })
 })()
 
 // ---- D-PLY-64 (2026-11-06): the owner claim names the Service INSTANCE ----
