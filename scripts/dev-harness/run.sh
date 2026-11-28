@@ -23,7 +23,10 @@
 #   run.sh scenario                  scripted Sources verification (sources-scenario.sh)
 #   run.sh player-scenario           scripted detached-player verification (player-scenario.sh)
 #   run.sh restart-shell             kill the detached harness shell and start a new one with
-#                                    the same environment, leaving the player alone (M2-02)
+#                                    the same environment, leaving the player alone (M2-02).
+#                                    The bar entry is the one the old shell's host stored: no
+#                                    playlistUrl or epgUrl once the plugin has taken them off
+#                                    (F-HARNESS-51)
 #   run.sh shell-stop                SIGTERM the detached harness shell and wait for it
 #   run.sh reap                      kill the detached shell, the fixture server and the
 #                                    harness player (what the foreground EXIT trap does)
@@ -507,6 +510,57 @@ stop_detached_shell() {
   # recorded pid could have been reused since the earlier invocation.]
   qa_stop_named "$pid" "$(qs_root)" 5 "detached harness shell"
   rm -f "$pidfile"
+  return 0
+}
+
+# F-HARNESS-51. What the fake host STORES for our entry when the shell is
+# about to be restarted, as a plan for the entry the next shell is seeded
+# with. A real host keeps shell.json across a shell restart, so the new shell
+# reads the entry the plugin's last write left: since D-SINK-19 that entry
+# carries no playlistUrl and no epgUrl (the plugin strips them once the
+# source is migrated) and carries the `sourceKey` mirror. The fake host holds
+# its config in memory, so until this a restart-shell seeded the recorded
+# --playlist again, which is the entry of a user who ran `omarchy bar set
+# ... playlistUrl` while the shell was down: every restart posted "Bar
+# setting ignored", ten a player-scenario run, and on an uncaged run they
+# reached the owner's notification daemon.
+#
+# The outgoing shell is ASKED (`ipc hostEntry`: key names and the source key,
+# never a URL), not guessed from state.json: a host whose entry the plugin
+# could not rewrite (the persist-fails lever, a section the host does not
+# walk) still stores the URL, and its restart must still present it (rule
+# 10). Prints one line:
+#   strip 1 <key>   no retired URL stored, and a sourceKey of <key> ("" allowed)
+#   strip 0         no retired URL stored, and no sourceKey
+#   keep            a retired URL is still stored: seed as recorded
+#   unknown         no answer, an entry the host's walk does not find, or a
+#                   reply this cannot read: seed as recorded
+stored_entry_plan() {
+  local reply plan
+  reply=$(timeout "$FOCUS_TIMEOUT" "$0" ipc hostEntry 2>/dev/null) || { echo unknown; return 0; }
+  plan=$(qa_json_field '"unknown" if not (isinstance(d.get("storedKeys"), list) and isinstance(d.get("section"), str) and d["section"] != "") else "keep" if ("playlistUrl" in d["storedKeys"] or "epgUrl" in d["storedKeys"]) else "strip 0" if "sourceKey" not in d["storedKeys"] else ("strip 1 " + d["stored"]) if isinstance(d.get("stored"), str) else "unknown"' "$reply")
+  case $plan in
+    keep|"strip 0") echo "$plan" ;;
+    "strip 1 "*) if [[ ${plan#strip 1 } == "" || ${plan#strip 1 } =~ ^[0-9a-f]{8}(-[0-9]+)?$ ]]; then echo "$plan"; else echo unknown; fi ;;
+    *) echo unknown ;;
+  esac
+  return 0
+}
+
+# Apply stored_entry_plan's line over the environment last-start.env just
+# restored. Only the two retired URLs and the key mirror move; every other
+# seed stays as recorded. `keep` and `unknown` change nothing.
+present_stored_entry() {
+  local plan=$1
+  case $plan in
+    "strip 0")
+      export OMARCHY_IPTV_PLAYLIST="" OMARCHY_IPTV_EPG="" ;;
+    "strip 1 "*)
+      export OMARCHY_IPTV_PLAYLIST="" OMARCHY_IPTV_EPG=""
+      export OMARCHY_IPTV_SOURCE_KEY="${plan#strip 1 }" OMARCHY_IPTV_SOURCE_KEY_SET=1 ;;
+    *) return 0 ;;
+  esac
+  echo "[run.sh] restart-shell: the host stores no playlistUrl or epgUrl for the entry, so the new shell is seeded with none (F-HARNESS-51)"
   return 0
 }
 
@@ -1180,10 +1234,12 @@ except Exception: print("<unreadable>")' | tr -d '\n')
       echo "[run.sh] no detached start recorded; use --detach first" >&2
       exit 2
     fi
+    stored=$(stored_entry_plan)
     stop_detached_shell
     harness_env
     # shellcheck source=/dev/null
     . "$SCRATCH/last-start.env"
+    present_stored_entry "$stored"
     # C2 (iii): come back to the tree --detach recorded, not to whatever this
     # terminal happens to export. Then assert the two agree, because a
     # disagreement is the mixed tree C1 guards the other half of.

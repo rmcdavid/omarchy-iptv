@@ -4445,6 +4445,89 @@ ck "start_qs and end_gdb are taken out of the rig's run.sh whole" \
 is "a start whose shell writes no pid fails, ends its gdb and what gdb started, at once, and says so" \
    "$(rq)" "1||gdb ended|child gone|prompt|1|over"
 
+# ============================ restart-shell and the stored entry (F-HARNESS-51)
+#
+# A real host keeps shell.json across a shell restart, so the new shell reads
+# the entry the plugin's last write left there: no playlistUrl, no epgUrl,
+# and the sourceKey mirror. run.sh's fake host is in memory, and until this
+# restart-shell seeded the recorded --playlist again, the entry of a user who
+# set playlistUrl while the shell was down, so every restart posted "Bar
+# setting ignored". restart-shell now asks the outgoing shell what its host
+# stores (`ipc hostEntry`) BEFORE it stops it, and seeds the new shell from
+# that. Driven here through run.sh's own restart-shell over a stub `qs` (the
+# hostEntry reply) and a stub `quickshell` that writes down the seed
+# variables it was started with, a URL only as "set". The pid file holds a
+# word that is no pid, so the stop signals nothing and still removes the
+# file, which is how the stub qs tells an ask before the stop from one
+# after. On 3eae25c's run.sh the first case reads "set set [] 0 number
+# asks= ": the URL seeded again and nobody asked.
+section "run.sh restart-shell seeds the entry the host stores (F-HARNESS-51)"
+RS=$TMP/rs
+RS_ALT=""
+(( ${#RS} <= 59 )) || { RS_ALT=$(mktemp -d /tmp/qa-rs-XXXXXX); RS=$RS_ALT; }
+mkdir -p "$RS/bin"
+cat >"$RS/bin/quickshell" <<RS_SHELL
+#!/bin/bash
+printf '%s %s [%s] %s %s\n' "\${OMARCHY_IPTV_PLAYLIST:+set}" "\${OMARCHY_IPTV_EPG:+set}" "\${OMARCHY_IPTV_SOURCE_KEY-UNSET}" "\${OMARCHY_IPTV_SOURCE_KEY_SET-UNSET}" "\${OMARCHY_IPTV_ORDER-UNSET}" >"$RS/seen.tmp"
+mv "$RS/seen.tmp" "$RS/seen"
+RS_SHELL
+cat >"$RS/bin/qs" <<RS_QS
+#!/bin/bash
+printf '%s\n' "\$*" >>"$RS/qs.argv"
+if [[ -e $RS/h/qs.pid ]]; then echo before >>"$RS/qs.when"; else echo after >>"$RS/qs.when"; fi
+cat "$RS/reply"
+exit "\$(cat "$RS/rc")"
+RS_QS
+chmod +x "$RS/bin/quickshell" "$RS/bin/qs"
+rs_reply() {   # rs_reply <storedKeys as JSON> <stored> <section>
+  printf '{"stored":"%s","published":"","storedKeys":%s,"publishedKeys":[],"storedShowLogos":null,"section":"%s","hostSections":["left","center","right"],"host":"lag"}\n' "$2" "$1" "$3" >"$RS/reply"
+}
+# rs_restart [recorded key] [recorded set] -> "<playlist> <epg> [<key>] <set> <order> asks=<n> <when>"
+# as the restarted shell was seeded; "NOSHELL" when run.sh started none.
+rs_restart() {
+  local i
+  rm -rf "$RS/h" "$RS/seen" "$RS/qs.argv" "$RS/qs.when"
+  mkdir -p "$RS/h"
+  echo gone >"$RS/h/qs.pid"
+  { qa_env_line OMARCHY_IPTV_PLUGIN_ROOT "$ROOT"
+    qa_env_line OMARCHY_IPTV_ROOT "$ROOT"
+    qa_env_line OMARCHY_IPTV_PLAYLIST "http://user:secret@rs.test/list.m3u"
+    qa_env_line OMARCHY_IPTV_EPG "http://rs.test/guide.xml"
+    qa_env_line OMARCHY_IPTV_SOURCE_KEY "${1-}"
+    qa_env_line OMARCHY_IPTV_SOURCE_KEY_SET "${2-0}"
+    qa_env_line OMARCHY_IPTV_ORDER number
+  } >"$RS/h/last-start.env"
+  PATH="$RS/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$RS/h \
+    env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u OMARCHY_IPTV_HARNESS_INSTANCE \
+    timeout 60 bash "$ROOT/scripts/dev-harness/run.sh" restart-shell >"$RS/out" 2>&1 || { echo "NOSHELL"; return 0; }
+  for ((i = 0; i < 100; i++)); do [[ -e $RS/seen ]] && break; sleep 0.1; done
+  [[ -e $RS/seen ]] || { echo "NOSHELL"; return 0; }
+  printf '%s asks=%s %s\n' "$(cat "$RS/seen")" "$(grep -c -x -- "ipc -p $RS/h/root call harness hostEntry" "$RS/qs.argv" 2>/dev/null)" "$(tr '\n' ' ' <"$RS/qs.when" 2>/dev/null | sed 's/ $//')"
+}
+echo 0 >"$RS/rc"
+rs_reply '["mpvArgs","sourceKey"]' abcd1234 right
+is "a stored entry with the key mirror and no retired URL: the new shell is seeded with the key and no URL, asked once, before the stop" \
+   "$(rs_restart)" "  [abcd1234] 1 number asks=1 before"
+ck "and run.sh says so, naming no URL" 'grep -q "the host stores no playlistUrl or epgUrl" "$RS/out" && ! grep -q "rs.test\|secret" "$RS/out"'
+rs_reply '["mpvArgs","sourceKey"]' "" right
+is "a stored key mirror that is empty is seeded as set and empty" "$(rs_restart abcd1234 1)" "  [] 1 number asks=1 before"
+rs_reply '["mpvArgs"]' "" right
+is "no retired URL and no key mirror stored: no URL, and the recorded key seed stays as it was" "$(rs_restart)" "  [] 0 number asks=1 before"
+rs_reply '["playlistUrl","sourceKey"]' abcd1234 right
+is "a host that still stores playlistUrl (a strip that never landed) is restarted as recorded" "$(rs_restart)" "set set [] 0 number asks=1 before"
+rs_reply '["epgUrl","sourceKey"]' abcd1234 right
+is "and so is one that still stores epgUrl alone" "$(rs_restart)" "set set [] 0 number asks=1 before"
+rs_reply '["sourceKey"]' abcd1234 ""
+is "an entry the host's walk does not find tells nothing: restarted as recorded" "$(rs_restart)" "set set [] 0 number asks=1 before"
+rs_reply '["sourceKey"]' "../../etc" right
+is "a stored key that is no source key is not seeded: restarted as recorded" "$(rs_restart)" "set set [] 0 number asks=1 before"
+echo 'QSDIAG: no instance' >"$RS/reply"
+is "a reply that is not JSON: restarted as recorded" "$(rs_restart)" "set set [] 0 number asks=1 before"
+rs_reply '["mpvArgs","sourceKey"]' abcd1234 right
+echo 1 >"$RS/rc"
+is "a shell that does not answer (qs exits 1) is restarted as recorded, whatever it printed" "$(rs_restart)" "set set [] 0 number asks=1 before"
+[[ -z $RS_ALT ]] || rm -rf "$RS_ALT"
+
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
 # Raise this when you add a check; never lower it to make a run green.
@@ -4741,7 +4824,10 @@ is "a start whose shell writes no pid fails, ends its gdb and what gdb started, 
 # P8 block over stubs, the second shell answering late. Red on 6a398e0's
 # scenario (3 of 4), and on three mutants (no wait; a bound of 2 s; a miss
 # that ends the scenario).
-EXPECTED=860
+# 860 -> 870 on 2026-11-28 (F-HARNESS-51, the daily run): restart-shell over
+# a stub qs and a stub quickshell, the seed the new shell is given. Red on
+# 3eae25c's run.sh (10 of 10: nobody asked), and on nine mutants of the fix.
+EXPECTED=870
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
